@@ -5,6 +5,9 @@ import { checkDeletion } from './delete-rules.mjs';
 import {
   checkSecrets, checkEnvironmentDump, checkGit, checkDatabase, checkPipeToShell, checkSelfApproval,
 } from './guard-rules.mjs';
+import { checkProtectedShell, checkProtectedFileWrite } from './protect-rules.mjs';
+
+const WRITE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
 const FILE_TOOLS = new Set(['Read', 'NotebookRead', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
@@ -40,6 +43,7 @@ function shellReason(toolName, toolInput, cwd) {
 
   const parsed = parseShell(command, toolName === 'PowerShell' ? 'ps' : 'bash');
   const reason =
+    checkProtectedShell(parsed.commands, cwd) ||
     checkSecrets(parsed.commands) ||
     checkEnvironmentDump(parsed.commands) ||
     checkDeletion(parsed.commands, cwd) ||
@@ -62,6 +66,9 @@ export function decide(input) {
   for (const value of pathValuesFor(toolName, toolInput)) {
     const selfApproval = checkSelfApproval(value);
     if (selfApproval) return selfApproval;
+    if ((WRITE_TOOLS.has(toolName) || toolName.startsWith('mcp__')) && checkProtectedFileWrite(value, cwd)) {
+      return checkProtectedFileWrite(value, cwd);
+    }
     if (tokenMentionsSecret(value)) return 'обращение к файлу с ключами или паролями (.env, .pem, id_rsa и т.п.)';
   }
   return null;

@@ -360,6 +360,76 @@ done
 node "$S/config.mjs" set share false >/dev/null
 expect "[]" "(отправка выключена: curl не вызывался)" "[]"
 
+echo "== защита самих хуков: настройки, плагин, конфиг (2) =="
+run_bash_list 2 \
+  'echo {} > ~/.claude/settings.json' \
+  'echo x >> ~/.claude/settings.local.json' \
+  'echo x>~/.claude/settings.json' \
+  'tee ~/.claude/settings.json < /tmp/x' \
+  'sed -i s/a/b/ ~/.claude/settings.json' \
+  'cp /tmp/x ~/.claude/settings.json' \
+  'mv /tmp/x .claude/settings.local.json' \
+  'rm ~/.claude/settings.json' \
+  'rm -rf ~/.claude/plugins' \
+  'jq . a.json > .claude/settings.json' \
+  'jq -n {} | sponge ~/.claude/settings.json' \
+  'python3 -c "open(\"/Users/x/.claude/settings.json\",\"w\").write(\"{}\")"' \
+  'node -e "require(\"fs\").writeFileSync(\".claude/settings.json\",\"{}\")"' \
+  'bash -c "echo {} > ~/.claude/settings.json"' \
+  'echo x > ${CLAUDE_PLUGIN_ROOT}/hooks/hooks.json' \
+  'echo {} > ~/.ii-ramis/config.json' \
+  'cp x ~/.ii-ramis/config.json' \
+  'cp x ~/.claude/plugins/cache/foo/hooks.json' \
+  'echo {} > .claude/settings*.json' \
+  'claude plugin disable ii-ramis' \
+  'claude plugin uninstall ii-ramis@ii-ramis' \
+  'claude plugin remove ii-ramis' \
+  'claude /plugin' \
+  "echo x > \"$S/guard.mjs\"" \
+  "sed -i s/a/b/ \"$S/guard-rules.mjs\"" \
+  "rm \"$S/guard.mjs\"" \
+  "mv \"$S/guard.mjs\" /tmp/g.mjs" \
+  "node \"$S/guard.mjs\"" \
+  "node \"$S/config.mjs\" set share true" \
+  "node \"$S/config.mjs\" set lesson 3 --force" \
+  "bash \"$S/install.sh\" ~/.claude/settings.json"
+run_ps_list 2 \
+  'Set-Content $HOME\.claude\settings.json "{}"' \
+  'Out-File ~/.claude/settings.json' \
+  'Add-Content .claude\settings.local.json "x"' \
+  'Remove-Item ~/.claude/settings.json' \
+  'Copy-Item x ~/.ii-ramis/config.json' \
+  'claude plugin disable ii-ramis'
+for f in "$HOME/.claude/settings.json" "$HOME/.claude/settings.local.json" "$WORK/proj/.claude/settings.json" "$WORK/proj/.claude/settings.local.json" "$HOME/.claude/plugins/cache/x/hooks.json" "$S/guard.mjs" "$S/../hooks/hooks.json" "$HOME/.ii-ramis/config.json"; do
+  expect 2 "Edit: $f" "$(guard Edit file_path "$f" "$WORK/proj")"
+  expect 2 "Write: $f" "$(guard Write file_path "$f" "$WORK/proj")"
+  expect 2 "MultiEdit: $f" "$(guard MultiEdit file_path "$f" "$WORK/proj")"
+done
+expect 2 "NotebookEdit: settings" "$(guard NotebookEdit notebook_path "$HOME/.claude/settings.json" "$WORK/proj")"
+expect 2 "mcp: запись в settings.json" "$(guard_json "{\"tool_name\":\"mcp__fs__write_file\",\"cwd\":\"$WORK/proj\",\"tool_input\":{\"path\":\"$HOME/.claude/settings.json\"}}")"
+
+echo "== защита хуков: чтение и свои скрипты проходят (0) =="
+run_bash_list 0 \
+  'cat ~/.claude/settings.json' \
+  'ls ~/.claude/plugins' \
+  'grep hooks .claude/settings.json' \
+  'jq . ~/.claude/settings.json' \
+  'git add .claude/settings.json' \
+  'cat ~/.ii-ramis/config.json' \
+  "node \"$S/config.mjs\" set lesson 3" \
+  "node \"$S/config.mjs\" set autosave false" \
+  "bash \"$S/install.sh\"" \
+  "node \"$S/setup-settings.mjs\"" \
+  "bash \"$S/diagnose.sh\" \"\$PWD\"" \
+  'bash "${CLAUDE_PLUGIN_ROOT}/scripts/diagnose.sh" "$PWD"' \
+  'node "${CLAUDE_PLUGIN_ROOT}/scripts/config.mjs" set lesson 5' \
+  "cat \"$S/guard.mjs\""
+run_ps_list 0 \
+  "pwsh -File \"$S/diagnose.ps1\"" \
+  'Get-Content ~/.claude/settings.json'
+expect 0 "Read: ~/.claude/settings.json" "$(guard Read file_path "$HOME/.claude/settings.json" "$WORK/proj")"
+expect 0 "Write: обычный файл проекта" "$(guard Write file_path "$WORK/proj/src/a.ts" "$WORK/proj")"
+
 echo "== hooks.json: матчер покрывает инструменты с путями =="
 for tool in Bash PowerShell Read NotebookRead Grep Glob Edit Write MultiEdit NotebookEdit mcp__server__tool; do
   node -e '
