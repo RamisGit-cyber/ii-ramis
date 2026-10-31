@@ -286,7 +286,27 @@ function interpreterAllowed(name, args, cwd) {
   return isScriptInProject(args[0], cwd, extension);
 }
 
+// Общее правило: если в строке есть интерпретатор, то менять окружение или собирать команды «на лету» в этой же строке нельзя.
+const ENVIRONMENT_VERBS = new Set(['export', 'declare', 'typeset', 'set', 'setenv', 'source', '.', 'unset', 'read', 'env']);
+const INDIRECT_RUNNERS = new Set(['xargs', 'parallel', 'watch', 'env']);
+
+function changesEnvironmentOrRunsIndirectly(cmd) {
+  const { tokens } = cmd;
+  const start = commandIndex(tokens);
+  if (start !== -1 && ENVIRONMENT_VERBS.has(verbName(tokens[start]))) return true;
+  if (tokens.some((t) => INDIRECT_RUNNERS.has(verbName(t)))) return true;
+  if (tokens.some((t) => verbName(t) === 'find') && tokens.some((t) => /^-(exec|execdir)$/.test(t))) return true;
+  return tokens.some((t) => /^\$?env:/i.test(t) || /CLAUDE_PLUGIN_ROOT=/.test(t));
+}
+
 export function checkInterpreters(commands, cwd) {
+  const hasInterpreter = commands.some((cmd) => {
+    const at = commandIndex(cmd.tokens);
+    return at !== -1 && INTERPRETER_VERBS.test(verbName(cmd.tokens[at]));
+  });
+  if (hasInterpreter && commands.some(changesEnvironmentOrRunsIndirectly)) {
+    return 'вместе с интерпретатором в одной строке меняется окружение или команда собирается на лету (export, source, env, xargs, find -exec): запускай по одному шагу';
+  }
   let movedDirectory = false;
   for (const cmd of commands) {
     const start = commandIndex(cmd.tokens);
