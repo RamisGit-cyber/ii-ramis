@@ -4,6 +4,7 @@ import { parseShell } from './shell-parse.mjs';
 import { checkDeletion } from './delete-rules.mjs';
 import {
   checkSecrets, checkEnvironmentDump, checkGit, checkDatabase, checkPipeToShell, checkSelfApproval,
+  checkInlineCode, checkUnverifiableReads,
 } from './guard-rules.mjs';
 import { checkProtectedShell, checkProtectedFileWrite } from './protect-rules.mjs';
 
@@ -48,7 +49,9 @@ function shellReason(toolName, toolInput, cwd) {
     checkEnvironmentDump(parsed.commands) ||
     checkDeletion(parsed.commands, cwd) ||
     checkGit(parsed.commands) ||
-    checkPipeToShell(command) ||
+    checkPipeToShell(parsed.commands) ||
+    checkInlineCode(parsed.commands) ||
+    checkUnverifiableReads(parsed.commands) ||
     checkDatabase(command);
   if (reason) return reason;
   if (parsed.problems.length > 0) return `не смог разобрать команду (${parsed.problems[0]})`;

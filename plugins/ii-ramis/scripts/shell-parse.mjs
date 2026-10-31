@@ -6,7 +6,7 @@ const MAX_DEPTH = 6;
 const SHELL_NAMES = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'ash', 'fish', 'csh', 'tcsh']);
 const PS_SHELLS = new Set(['powershell', 'pwsh']);
 const EVAL_NAMES = new Set(['eval', 'iex', 'invoke-expression']);
-const FETCH_NAMES = new Set(['curl', 'wget', 'iwr', 'irm', 'invoke-webrequest', 'invoke-restmethod']);
+export const FETCH_NAMES = new Set(['curl', 'wget', 'iwr', 'irm', 'invoke-webrequest', 'invoke-restmethod']);
 const ECHO_NAMES = new Set(['echo', 'printf', 'write-output', 'write-host']);
 export const KEYWORDS = new Set(['if', 'then', 'else', 'elif', 'fi', 'do', 'done', 'while', 'until', 'for', 'in', 'case', 'esac', 'function', 'time', '!', '{', '}', 'select']);
 const WRAPPERS = new Set(['sudo', 'doas', 'env', 'command', 'builtin', 'exec', 'nohup', 'nice', 'timeout', 'stdbuf', 'setsid', 'ionice']);
@@ -88,6 +88,7 @@ function parseInto(src, mode, depth, out) {
   let lineStart = out.commands.length;
   let carry = null; // предыдущая команда, если с ней соединён конвейер
   const pendingHeredocs = [];
+  let pendingSubs = []; // команды из $(...) внутри текущей команды: нужны, чтобы увидеть `bash <(curl ...)`
 
   const flushToken = () => {
     if (started) tokens.push(current);
@@ -97,7 +98,10 @@ function parseInto(src, mode, depth, out) {
   const endCommand = (pipedInto) => {
     flushToken();
     if (tokens.length === 0) { if (!pipedInto) carry = null; return; }
-    const cmd = { tokens, pipedInto, mode, prev: carry, consumed: new Set() };
+    const cmd = {
+      tokens, pipedInto, mode, prev: carry, consumed: new Set(), subs: pendingSubs, heredoc: pendingHeredocs.length > 0,
+    };
+    pendingSubs = [];
     out.commands.push(cmd);
     carry = pipedInto ? cmd : null;
     tokens = [];
@@ -105,7 +109,9 @@ function parseInto(src, mode, depth, out) {
   const substitute = (inner) => {
     const firstNew = out.commands.length;
     parseInto(inner, mode, depth + 1, out);
-    out.commands.slice(firstNew).forEach((cmd) => { cmd.inSubstitution = true; });
+    const added = out.commands.slice(firstNew);
+    added.forEach((cmd) => { cmd.inSubstitution = true; });
+    pendingSubs.push(...added);
     current += '$()';
     started = true;
   };
@@ -151,6 +157,13 @@ function parseInto(src, mode, depth, out) {
       if (prev === '>' || prev === '<' || next === '>') { current += ch; started = true; i += 1; continue; }
       endCommand(false);
       i += 1;
+      continue;
+    }
+    if (ch === '(' && ps) { // в PowerShell (...) — подвыражение, как $(...)
+      const close = findClosingParen(src, i + 1);
+      if (close === -1) { out.problems.push('не закрыта скобка в команде'); i = src.length; continue; }
+      substitute(src.slice(i + 1, close));
+      i = close + 1;
       continue;
     }
     if (ch === '(' || ch === ')') { endCommand(false); i += 1; continue; }

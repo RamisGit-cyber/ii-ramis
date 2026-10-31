@@ -1,4 +1,5 @@
 // Правила про удаление файлов. Работают по разобранным командам (shell-parse.mjs), а не по сырой строке.
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { verbName, commandIndex, isAssignment } from './shell-parse.mjs';
@@ -9,11 +10,10 @@ const SAFE_DIR_NAMES = new Set([
 ]);
 const DELETE_VERBS = new Set(['rm', 'rmdir', 'rd', 'del', 'erase', 'remove-item', 'ri', 'unlink', 'shred', 'rimraf']);
 const POWERSHELL_VERBS = new Set(['remove-item', 'ri']);
+// Пары «инструмент + подкоманда rm»: npm rm lodash, docker rm web. Допустимо только на настоящей позиции команды.
 const PACKAGE_TOOLS = new Set(['npm', 'pnpm', 'yarn', 'docker', 'podman', 'brew', 'pip', 'pip3', 'apt', 'apt-get', 'kubectl', 'helm', 'vercel', 'gh', 'supabase']);
+const OBJECT_WORDS = new Set(['container', 'image', 'volume', 'network', 'system']);
 const HOME_VARIABLES = /^(\$\{?HOME\}?|\$env:(USERPROFILE|HOME)|%USERPROFILE%|%HOMEPATH%)(?=$|[/\\])/i;
-const INTERPRETERS = new Set(['python', 'python3', 'node', 'perl', 'ruby', 'php', 'deno', 'bun']);
-const INLINE_CODE_FLAG = /^(-c|-e|-p|--eval|--print|-r)$/;
-const DESTRUCTIVE_CODE = /rmSync|rmdirSync|unlinkSync|fs\.rm\b|fs\.unlink|rimraf|rmtree|removedirs|os\.remove|os\.unlink|\brm\s+-[a-z]*r|Remove-Item/i;
 const SUSPICIOUS_ARGS = /^(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive|--no-preserve-root|-recurse|~|\/|\/\*|~\/\*)$/;
 
 function isInside(child, parent) {
@@ -53,6 +53,22 @@ function resolveTarget(target, cwd) {
   return path.resolve(cwd, target);
 }
 
+// Ближайший существующий родитель + реальный путь: так видны симлинки (node_modules -> ~).
+function realpathNearest(target) {
+  let current = target;
+  const rest = [];
+  for (;;) {
+    try {
+      return path.join(fs.realpathSync(current), ...rest.reverse());
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return target;
+      rest.push(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
 // Проверка одной цели удаления. recursive: папки можно только мусорные внутри проекта.
 export function checkDeleteTarget(rawTarget, cwd, recursive) {
   const target = expandKnownVariables(rawTarget, cwd);
@@ -64,10 +80,17 @@ export function checkDeleteTarget(rawTarget, cwd, recursive) {
   const resolved = resolveTarget(target, cwd);
   const tmpRoots = [os.tmpdir(), '/tmp', '/private/tmp'];
   const cwdInTmp = tmpRoots.some((root) => isInside(cwd, root));
-  if (!cwdInTmp && tmpRoots.some((root) => isInside(resolved, root))) return null;
+  const realTarget = realpathNearest(resolved);
+  if (!cwdInTmp && tmpRoots.some((root) => isInside(resolved, root))) {
+    return tmpRoots.some((root) => isInside(realTarget, realpathNearest(root)))
+      ? null
+      : `удаление через ссылку, ведущую за пределы временной папки (${rawTarget})`;
+  }
   if (!isInside(resolved, cwd)) return `удаление вне папки проекта (${rawTarget})`;
+  const realCwd = realpathNearest(cwd);
+  if (!isInside(realTarget, realCwd)) return `путь ведёт через символическую ссылку за пределы проекта (${rawTarget})`;
   if (!recursive) return null;
-  const segments = path.relative(cwd, resolved).split(path.sep);
+  const segments = path.relative(realCwd, realTarget).split(path.sep);
   if (segments.includes('.git')) return 'удаление истории сохранений (.git)';
   if (!segments.some((name) => SAFE_DIR_NAMES.has(name))) {
     return `рекурсивное удаление не-мусорной папки (${rawTarget}): разрешены только node_modules, dist, .next, build и подобные`;
@@ -79,12 +102,19 @@ function isCommandPosition(tokens, index) {
   return commandIndex(tokens) === index || tokens.slice(0, index).every((t) => isFlag(t) || isAssignment(t) || /^\d+$/.test(t) || /^(sudo|doas|env|command|exec|time|nohup)$/.test(verbName(t)));
 }
 
+function isPackageSubcommand(tokens, index) {
+  const start = commandIndex(tokens);
+  if (start === -1) return false;
+  const tool = verbName(tokens[start]);
+  if (tool === 'git') return tokens.includes('--cached');
+  if (!PACKAGE_TOOLS.has(tool)) return false;
+  return index === start + 1 || (index === start + 2 && OBJECT_WORDS.has(tokens[start + 1]));
+}
+
 function checkDeleteVerb(tokens, index, cwd, mode) {
   const name = verbName(tokens[index]);
-  const previous = index > 0 ? verbName(tokens[index - 1]) : '';
   const args = tokens.slice(index + 1);
-  if (PACKAGE_TOOLS.has(previous)) return null; // npm rm lodash, docker rm x: это не удаление файлов
-  if (previous === 'git' && args.includes('--cached')) return null;
+  if (isPackageSubcommand(tokens, index)) return null; // npm rm lodash, docker rm x: это не удаление файлов
   const recursive = isRecursive(name, args, mode);
   const targets = targetsOf(args);
   if (!recursive && !isCommandPosition(tokens, index)) return null;
@@ -113,6 +143,20 @@ function checkFind(tokens, index, cwd) {
   return null;
 }
 
+// Симлинк на чужую папку или с именем «мусорной» папки (node_modules -> ~) обманул бы проверку удаления.
+function checkLinkCreation(name, rest, cwd) {
+  const isLn = name === 'ln' && rest.some((a) => /^-[a-zA-Z]*s|^--symbolic/.test(a));
+  const isNewItem = (name === 'new-item' || name === 'ni') && rest.some((a) => /^(symboliclink|junction|hardlink)$/i.test(a));
+  if (!isLn && !isNewItem && name !== 'mklink') return null;
+  const operands = rest.filter((a) => !isFlag(a) && !/^(symboliclink|junction|hardlink)$/i.test(a));
+  for (const operand of operands) {
+    if (SAFE_DIR_NAMES.has(path.basename(operand.replace(/[/\\]+$/, '')))) return `создание ссылки с именем «мусорной» папки (${operand})`;
+    const outside = checkDeleteTarget(operand, cwd, false);
+    if (outside) return `создание символической ссылки: ${outside}`;
+  }
+  return null;
+}
+
 // Возвращает причину блокировки или null. commands — плоский список простых команд из parseShell.
 export function checkDeletion(commands, cwd) {
   for (const cmd of commands) {
@@ -125,9 +169,8 @@ export function checkDeletion(commands, cwd) {
       if (/[$*?{]/.test(name) && rest.some((a) => SUSPICIOUS_ARGS.test(a))) {
         return 'команда собрана из переменной или шаблона и выглядит как удаление: не могу проверить';
       }
-      if (INTERPRETERS.has(name) && rest.some((a, i) => INLINE_CODE_FLAG.test(a) && DESTRUCTIVE_CODE.test(rest[i + 1] || ''))) {
-        return 'удаление файлов через встроенный скрипт (python/node): не могу проверить, что сотрётся';
-      }
+      const linkReason = checkLinkCreation(name, rest, cwd);
+      if (linkReason) return linkReason;
     }
     tokens.forEach((token, index) => {
       if (cmd.deleteReason) return;
