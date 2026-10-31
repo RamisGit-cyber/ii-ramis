@@ -180,29 +180,21 @@ export function isTrustedUrl(rawUrl) {
   return url.hostname === RAW_GITHUB_HOST && RAW_GITHUB_PREFIXES.some((prefix) => url.pathname.startsWith(prefix));
 }
 
-// ---- Скрипты из интернета: смотрим на разобранные команды, а не на сырую строку ----
+// ---- Скрипты из интернета: запрет по умолчанию, смотрим на разобранные команды ----
+// Любой конвейер «загрузчик -> интерпретатор» (и <(curl ...), и $(curl ...) внутри интерпретатора) разрешён
+// только для доверенного https-адреса и безобидного набора флагов. Что читает интерпретатор, не угадываем.
 const PIPE_TARGETS = new Set([
   'sh', 'bash', 'zsh', 'dash', 'ksh', 'ash', 'fish', 'csh', 'tcsh', 'node', 'nodejs', 'bun', 'deno', 'ruby', 'perl', 'php',
   'pwsh', 'powershell', 'iex', 'invoke-expression', 'eval', 'source', '.',
 ]);
-const FETCH_VALUE_FLAGS = new Set([
-  '-H', '-o', '-A', '-e', '-u', '-X', '-d', '-m', '-x', '-w', '-b', '-c', '-O', '-U', '-T', '-t', '-P',
-  '--header', '--output', '--user-agent', '--max-time', '--retry', '--proxy', '--data', '--output-document', '--timeout',
-  '-headers', '-outfile', '-method', '-useragent', '-body', '-contenttype', '-timeoutsec', '-credential',
-]);
-// У wget -O и -P берут значение, а у curl -O нет: при сомнении считаем, что значение есть (строже).
+const SAFE_FETCH_LONG_FLAGS = new Set(['--fail', '--silent', '--show-error', '--location', '--tlsv1.2', '-usebasicparsing']);
+const SAFE_FETCH_SHORT_FLAGS = /^-[fsSLq]+$/;
 
 function isInterpreterName(name) {
   return PIPE_TARGETS.has(name) || /^python[\d.]*$/.test(name);
 }
 
-function readsStandardInput(args) {
-  if (args.some((a) => a === '-s' || a === '-' || a === '-Command')) return true;
-  if (args.some((a) => a === '-m' || a === '-c' || a === '-e')) return false;
-  return !args.some((a) => !a.startsWith('-'));
-}
-
-// Все не-флаговые аргументы загрузчика обязаны быть доверенными https-адресами; без адреса или с переменной — недоверенно.
+// Загрузчик доверенный: все аргументы — безобидные флаги или https-адреса из списка, и хотя бы один адрес есть.
 function fetchIsTrusted(tokens) {
   const start = tokens.findIndex((t) => FETCH_NAMES.has(verbName(t)));
   if (start === -1) return true;
@@ -210,16 +202,11 @@ function fetchIsTrusted(tokens) {
   let urls = 0;
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
-    if (arg === '-' || arg === '--') continue;
-    if (arg.startsWith('-')) {
-      if (FETCH_VALUE_FLAGS.has(arg) || FETCH_VALUE_FLAGS.has(arg.toLowerCase())) { i += 1; continue; }
-      const embedded = arg.match(/=(.*)$/);
-      if (embedded && embedded[1].includes('://')) {
-        if (!isTrustedUrl(embedded[1])) return false;
-        urls += 1;
-      }
-      continue;
-    }
+    if (arg === '-O-' || arg === '-o-' || arg === '-qO-' || /^-uri$/i.test(arg)) continue;
+    if ((arg === '-O' || arg === '-o') && args[i + 1] === '-') { i += 1; continue; }
+    if (arg === '--proto' && args[i + 1] === '=https') { i += 1; continue; }
+    if (SAFE_FETCH_SHORT_FLAGS.test(arg) || SAFE_FETCH_LONG_FLAGS.has(arg.toLowerCase())) continue;
+    if (arg.startsWith('-')) return false;
     if (!isTrustedUrl(arg)) return false;
     urls += 1;
   }
@@ -229,51 +216,61 @@ function fetchIsTrusted(tokens) {
 export function checkPipeToShell(commands) {
   for (const cmd of commands) {
     const start = commandIndex(cmd.tokens);
-    if (start === -1) continue;
-    const name = verbName(cmd.tokens[start]);
-    if (!isInterpreterName(name)) continue;
+    if (start === -1 || !isInterpreterName(verbName(cmd.tokens[start]))) continue;
     const upstream = [];
     for (let prev = cmd.prev; prev; prev = prev.prev) upstream.push(prev);
-    const fetchers = upstream.filter((c) => c.tokens.some((t) => FETCH_NAMES.has(verbName(t))));
-    const args = cmd.tokens.slice(start + 1);
-    const fromPipe = fetchers.length > 0 && readsStandardInput(args);
-    const fromSubstitution = cmd.subs.filter((c) => c.tokens.some((t) => FETCH_NAMES.has(verbName(t))));
-    if ([...(fromPipe ? fetchers : []), ...fromSubstitution].some((c) => !fetchIsTrusted(c.tokens))) {
-      return 'запуск скрипта, скачанного из интернета, с непроверенного адреса';
+    const fetchers = [...upstream, ...cmd.subs].filter((c) => c.tokens.some((t) => FETCH_NAMES.has(verbName(t))));
+    if (fetchers.some((c) => !fetchIsTrusted(c.tokens))) {
+      return 'запуск скрипта, скачанного из интернета, с непроверенного адреса или с нестандартными флагами';
     }
   }
   return null;
 }
 
 // ---- Код внутри интерпретаторов: по умолчанию запрещён, кроме коротких безобидных однострочников ----
-const INLINE_FLAGS = [
-  [/^python[\d.]*$/, /^-[a-zA-Z]*c$/],
-  [/^(node|nodejs|bun)$/, /^(-e|-p|-pe|--eval|--print)$/],
-  [/^ruby$/, /^-[a-zA-Z]*e$/],
-  [/^perl$/, /^-[a-zA-Z]*[eE]$/],
-  [/^php$/, /^-r$/],
-];
 const SAFE_ONE_LINER = /^\s*(?:import (?:sys|platform);\s*)?(?:print\(\s*(?:\d+|(["'])[\w .,:!-]*\1|sys\.version|sys\.version_info|platform\.[a-z_]+\(\))\s*\)|console\.log\(\s*(?:\d+|(["'])[\w .,:!-]*\2|process\.version|process\.versions\.node|process\.platform)\s*\)|process\.version|process\.versions\.node|process\.platform)\s*;?\s*$/;
 const INTERPRETER_VERBS = /^(python[\d.]*|node|nodejs|bun|deno|ruby|perl|php)$/;
+const POWERSHELL_CODE_FLAG = /^-(c(o(m(m(a(n(d)?)?)?)?)?)?|e(c|nc(o(d(e(d(c(o(m(m(a(n(d)?)?)?)?)?)?)?)?)?)?)?)?)([:=].*)?$/i;
+
+// Ищет флаг «вот код» в любой записи (-c, -cCODE, -uc, --eval=CODE, -pe). Возвращает {code} или null.
+function inlineCodeOf(name, args) {
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    let match = null;
+    if (/^python/.test(name) && /^-[A-Za-z]/.test(arg)) {
+      for (let j = 1; j < arg.length && /[A-Za-z]/.test(arg[j]); j += 1) {
+        if (arg[j] === 'm') break;
+        if (arg[j] === 'c') { match = [null, arg.slice(j + 1)]; break; }
+      }
+    } else if (/^(node|nodejs|bun)$/.test(name)) {
+      match = arg.match(/^--(?:eval|print)(?:=(.*))?$/) || arg.match(/^-(?:pe|ep|e|p)(.*)$/);
+    } else if (name === 'ruby') match = arg.match(/^-[A-Za-z]*e(.*)$/);
+    else if (name === 'perl') match = arg.match(/^-[A-Za-z]*[eE](.*)$/);
+    else if (name === 'php') match = arg.match(/^-r(.*)$/);
+    if (match) return { code: match[1] ? match[1] : args[i + 1] };
+  }
+  return null;
+}
 
 export function checkInlineCode(commands) {
   for (const cmd of commands) {
     const start = commandIndex(cmd.tokens);
     if (start === -1) continue;
     const name = verbName(cmd.tokens[start]);
-    if (!INTERPRETER_VERBS.test(name)) continue;
     const args = cmd.tokens.slice(start + 1);
+    if ((name === 'pwsh' || name === 'powershell') && args.some((a) => POWERSHELL_CODE_FLAG.test(a))) {
+      return `код в ${name} (-Command/-EncodedCommand) запрещён: не могу проверить`;
+    }
+    if (!INTERPRETER_VERBS.test(name)) continue;
     if (cmd.heredoc) return `код для ${name} передан через heredoc: не могу проверить`;
     if (name === 'deno' && args[0] === 'eval') return 'встроенный код deno: не могу проверить';
-    const rule = INLINE_FLAGS.find(([pattern]) => pattern.test(name));
-    const flagAt = rule ? args.findIndex((a) => rule[1].test(a)) : -1;
-    if (flagAt !== -1) {
-      const code = args[flagAt + 1];
-      if (code === undefined || !SAFE_ONE_LINER.test(code)) {
+    const inline = inlineCodeOf(name, args);
+    if (inline) {
+      if (inline.code === undefined || !SAFE_ONE_LINER.test(inline.code)) {
         return `встроенный код в ${name} запрещён (разрешены только однострочники вроде печати версии)`;
       }
-    } else if (cmd.prev && readsStandardInput(args) && !args.some((a) => a === '-m')) {
-      const fromFetch = [...[cmd.prev]].some((p) => p.tokens.some((t) => FETCH_NAMES.has(verbName(t))));
+    } else if (cmd.prev && !args.some((a) => !a.startsWith('-')) && !args.includes('-m')) {
+      const fromFetch = cmd.prev.tokens.some((t) => FETCH_NAMES.has(verbName(t)));
       if (!fromFetch) return `код для ${name} приходит из конвейера: не могу проверить`;
     }
   }
