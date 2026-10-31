@@ -1,0 +1,12 @@
+{
+  "name": "ii-ramis",
+  "displayName": "ИИ Рамис",
+  "description": "ИИ-наставник курса «ИИнутый»: объясняет простыми словами, делает сам, проверяет компьютер, страхует от опасных команд",
+  "author": {
+    "name": "Рамис Жолдошев"
+  },
+  "homepage": "https://github.com/RamisGit-cyber/ii-ramis",
+  "repository": "https://github.com/RamisGit-cyber/ii-ramis",
+  "license": "MIT",
+  "keywords": ["education", "mentor", "beginners", "russian"]
+}
