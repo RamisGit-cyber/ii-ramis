@@ -1,0 +1,68 @@
+// Решение охранника: вернуть причину отказа или null. Отдельный модуль, чтобы поломка импорта не обходила защиту (см. guard.mjs).
+import { tokenMentionsSecret } from './lib.mjs';
+import { parseShell } from './shell-parse.mjs';
+import { checkDeletion } from './delete-rules.mjs';
+import {
+  checkSecrets, checkEnvironmentDump, checkGit, checkDatabase, checkPipeToShell, checkSelfApproval,
+} from './guard-rules.mjs';
+
+const FILE_TOOLS = new Set(['Read', 'NotebookRead', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
+const PATH_KEY = /path|file|dir|folder|uri|glob|pattern|source|destination|target/i;
+
+export class Denied extends Error {}
+
+function stringsUnder(value, keyMatches, key = '', depth = 0, found = []) {
+  if (depth > 6 || value === null || value === undefined) return found;
+  if (typeof value === 'string') {
+    if (keyMatches(key)) found.push(value);
+  } else if (Array.isArray(value)) {
+    value.forEach((item) => stringsUnder(item, keyMatches, key, depth + 1, found));
+  } else if (typeof value === 'object') {
+    Object.entries(value).forEach(([k, v]) => stringsUnder(v, keyMatches, k, depth + 1, found));
+  }
+  return found;
+}
+
+function pathValuesFor(toolName, toolInput) {
+  if (toolName === 'Grep') return stringsUnder(toolInput, (k) => k === 'path' || k === 'glob');
+  if (toolName === 'Glob') return stringsUnder(toolInput, (k) => k === 'path' || k === 'pattern');
+  if (FILE_TOOLS.has(toolName)) return stringsUnder(toolInput, (k) => k === 'file_path' || k === 'notebook_path' || k === 'path');
+  return stringsUnder(toolInput, (k) => PATH_KEY.test(k)); // mcp__*: любые поля, похожие на пути
+}
+
+function shellReason(toolName, toolInput, cwd) {
+  const command = toolInput.command;
+  if (command === undefined || command === '') return null;
+  if (typeof command !== 'string') throw new Denied('команда в непонятном формате');
+  const selfApproval = checkSelfApproval(command);
+  if (selfApproval) return selfApproval;
+
+  const parsed = parseShell(command, toolName === 'PowerShell' ? 'ps' : 'bash');
+  const reason =
+    checkSecrets(parsed.commands) ||
+    checkEnvironmentDump(parsed.commands) ||
+    checkDeletion(parsed.commands, cwd) ||
+    checkGit(parsed.commands) ||
+    checkPipeToShell(command) ||
+    checkDatabase(command);
+  if (reason) return reason;
+  if (parsed.problems.length > 0) return `не смог разобрать команду (${parsed.problems[0]})`;
+  return null;
+}
+
+export function decide(input) {
+  const toolName = String(input.tool_name || '');
+  const toolInput = input.tool_input && typeof input.tool_input === 'object' ? input.tool_input : {};
+  const cwd = typeof input.cwd === 'string' && input.cwd ? input.cwd : process.cwd();
+  if (!toolName) throw new Denied('не понял, какой инструмент вызван');
+
+  if (SHELL_TOOLS.has(toolName)) return shellReason(toolName, toolInput, cwd);
+
+  for (const value of pathValuesFor(toolName, toolInput)) {
+    const selfApproval = checkSelfApproval(value);
+    if (selfApproval) return selfApproval;
+    if (tokenMentionsSecret(value)) return 'обращение к файлу с ключами или паролями (.env, .pem, id_rsa и т.п.)';
+  }
+  return null;
+}

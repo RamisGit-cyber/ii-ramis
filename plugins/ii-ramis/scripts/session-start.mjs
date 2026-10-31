@@ -4,17 +4,18 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { STATE_FILE, loadConfig, readJson, writeJson, readStdinJson } from './lib.mjs';
+import {
+  STATE_FILE, LEGACY_APPROVALS_FILE, loadConfig, readJson, writeJson, readStdinJson, mentionsSecretPath,
+} from './lib.mjs';
 
 const CONFIG_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'config.mjs');
 const MAX_CHANGED_FILES = 300;
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const PROJECT_MARKERS = ['package.json', 'index.html', 'pyproject.toml', 'requirements.txt', 'CLAUDE.md', 'next.config.js', 'vite.config.js'];
-const SECRET_FILE = /(^|\/)(\.env(\.(?!example|sample|template)[\w-]+)?|[^/]+\.(pem|key|p12|pfx)|id_(rsa|ed25519|ecdsa|dsa))$/i;
 
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, { encoding: 'utf8', timeout: 8000, windowsHide: true, ...options });
-  return { ok: result.status === 0, out: (result.stdout || '').trim(), err: (result.stderr || '').trim() };
+  const result = spawnSync(command, args, { encoding: 'utf8', timeout: 8000, windowsHide: true, maxBuffer: 64 * 1024 * 1024, ...options });
+  return { ok: result.status === 0, out: (result.stdout || '').trim(), raw: result.stdout || '', err: (result.stderr || '').trim() };
 }
 
 function isHomeLike(dir) {
@@ -39,6 +40,21 @@ function toolsMissing() {
   return missing;
 }
 
+// Формат `XY путь\0`; для переименований и копий следом идёт ещё одна запись со старым путём.
+function parsePorcelainZ(raw) {
+  const entries = raw.split('\0').filter(Boolean);
+  const files = [];
+  for (let i = 0; i < entries.length; i += 1) {
+    const entry = entries[i];
+    files.push(entry.slice(3));
+    if (/^[RC]/.test(entry) || /^.[RC]/.test(entry)) {
+      i += 1;
+      if (entries[i]) files.push(entries[i]);
+    }
+  }
+  return files;
+}
+
 function gitCheckpoint(cwd, config) {
   if (config.autosave === false) return null;
   if (!run('git', ['rev-parse', '--git-dir'], { cwd }).ok) return null;
@@ -48,15 +64,16 @@ function gitCheckpoint(cwd, config) {
   const absGitDir = path.resolve(cwd, gitDir);
   if (['MERGE_HEAD', 'REBASE_HEAD', 'rebase-merge', 'rebase-apply', 'CHERRY_PICK_HEAD'].some((name) => fs.existsSync(path.join(absGitDir, name)))) return null;
 
-  const status = run('git', ['status', '--porcelain'], { cwd });
-  if (!status.ok || !status.out) return null;
-  const lines = status.out.split('\n');
-  const secretLines = lines.filter((line) => SECRET_FILE.test(line.slice(3).replace(/"/g, '')));
-  if (secretLines.length > 0) {
-    return 'Автосохранение пропущено: файл с ключами не в .gitignore. Добавь его в .gitignore сам (без чтения содержимого), потом сохрани.';
+  // -z: пути приходят как есть (без кавычек и экранирования), --untracked-files=all: файлы внутри новых папок тоже видны.
+  const status = run('git', ['status', '--porcelain', '--untracked-files=all', '-z'], { cwd });
+  if (!status.ok) return `Автосохранение пропущено: не смог получить список изменений (${status.err.slice(0, 100)}).`;
+  const changed = parsePorcelainZ(status.raw);
+  if (changed.length === 0) return null;
+  if (changed.some((file) => mentionsSecretPath('/' + file))) {
+    return 'Автосохранение пропущено: среди изменённых файлов есть файл с ключами, и он не в .gitignore. Добавь его в .gitignore сам (без чтения содержимого), потом сохрани.';
   }
-  if (lines.length > MAX_CHANGED_FILES) {
-    return `Автосохранение пропущено: изменилось ${lines.length} файлов. Скорее всего нет .gitignore для node_modules. Проверь и добавь его.`;
+  if (changed.length > MAX_CHANGED_FILES) {
+    return `Автосохранение пропущено: изменилось ${changed.length} файлов. Скорее всего нет .gitignore для node_modules. Проверь и добавь его.`;
   }
   const identity = ['-c', 'user.name=Ученик ИИнутого', '-c', 'user.email=student@ii-ramis.local'];
   const hasName = run('git', ['config', 'user.name'], { cwd }).out;
@@ -65,13 +82,23 @@ function gitCheckpoint(cwd, config) {
   const added = run('git', ['add', '-A'], { cwd });
   const committed = run('git', [...prefix, 'commit', '-q', '--no-verify', '-m', 'checkpoint перед сессией'], { cwd });
   if (!added.ok || !committed.ok) return `Автосохранение не удалось: ${committed.err || added.err}`.slice(0, 200);
-  return `Автосохранение: сделан коммит «checkpoint перед сессией» (${lines.length} изменённых файлов), в облако не отправлялся.`;
+  return `Автосохранение: сделан коммит «checkpoint перед сессией» (${changed.length} изменённых файлов), в облако не отправлялся.`;
+}
+
+// Служебная уборка: старый файл одобрений больше не используется. Сбой здесь не должен ломать запуск.
+function removeLegacyApprovals() {
+  try {
+    fs.rmSync(LEGACY_APPROVALS_FILE, { force: true });
+  } catch (error) {
+    console.error(`ii-ramis session-start: не удалил старый файл одобрений: ${error.message}`);
+  }
 }
 
 function main() {
   const input = readStdinJson();
   const cwd = input.cwd || process.cwd();
   const config = loadConfig();
+  removeLegacyApprovals();
   const state = readJson(STATE_FILE, {});
   const notes = [];
 
