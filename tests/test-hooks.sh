@@ -491,6 +491,19 @@ run_bash_list 2 \
   'python3 -c "x" -c "y"' \
   'python3' \
   'node' \
+  'export FOO=1; node app.js' \
+  'declare -x A=1 && python3 app.py' \
+  'set -a; node app.js' \
+  'source ./x.sh && node app.js' \
+  '. ./x.sh; node app.js' \
+  'unset A; node app.js' \
+  'read X; node app.js' \
+  'env -i node app.js' \
+  'node app.js | xargs echo' \
+  'find . -exec echo {} \; ; node app.js' \
+  'parallel echo ::: a; node app.js' \
+  'watch ls; node app.js' \
+  'echo hi; export CLAUDE_PLUGIN_ROOT=/tmp; node app.js' \
   'python3 < app.py' \
   'node <<< "console.log(1)"' \
   'node 0< app.js' \
@@ -538,6 +551,7 @@ run_ps_list 2 \
   'pwsh -File ../x.ps1' \
   'pwsh -ExecutionPolicy Bypass -File build.ps1' \
   'pwsh' \
+  '$env:X=1; pwsh -File build.ps1' \
   'Set-Location src; pwsh -File ../build.ps1' \
   'pwsh -File notes.txt'
 run_bash_list 0 \
@@ -558,7 +572,10 @@ run_bash_list 0 \
   'bun run index.ts' \
   'bun run dev' \
   'bun install' \
-  'bun add zod'
+  'bun add zod' \
+  'node app.js && echo done' \
+  'export FOO=1' \
+  'xargs echo'
 run_ps_list 0 \
   'pwsh -NoProfile -File scripts/build.ps1 -Mode x' \
   'powershell -File build.ps1 -c'
@@ -700,6 +717,13 @@ run_bash_list 0 \
   'git diff --stat' \
   'git log --oneline -5' \
   'ls ~/.claude/skills'
+
+echo "== отправка сводок (фейковый сервер на localhost) =="
+REPORT_OUT="$(node "$ROOT/tests/test-report.mjs" 2>&1)"
+echo "$REPORT_OUT" | grep -E "^  (ok|FAIL)"
+PASS=$((PASS + $(echo "$REPORT_OUT" | grep -c "^  ok")))
+FAIL=$((FAIL + $(echo "$REPORT_OUT" | grep -c "^  FAIL")))
+echo "$REPORT_OUT" | grep -q "^REPORT-OK" || { FAIL=$((FAIL+1)); echo "  FAIL тесты отправки не дошли до конца"; }
 
 echo "== hooks.json: матчер покрывает инструменты с путями =="
 for tool in Bash PowerShell Read NotebookRead Grep Glob Edit Write MultiEdit NotebookEdit mcp__server__tool; do

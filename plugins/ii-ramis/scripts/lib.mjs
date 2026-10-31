@@ -33,15 +33,17 @@ export function writeJson(file, value) {
 
 export function loadConfig() {
   const existing = readJson(CONFIG_FILE, null);
-  if (existing && existing.student_id) return existing;
+  if (existing && existing.student_id && existing.install_id) return existing;
   const created = {
     student_id: crypto.randomUUID(),
+    install_id: crypto.randomBytes(18).toString('base64url'), // 24 символа [A-Za-z0-9_-]
     share: false,
     lesson: null,
     autosave: true,
     ...(existing || {}),
   };
   if (!created.student_id) created.student_id = crypto.randomUUID();
+  if (!created.install_id) created.install_id = crypto.randomBytes(18).toString('base64url');
   writeJson(CONFIG_FILE, created);
   return created;
 }

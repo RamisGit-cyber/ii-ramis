@@ -2,7 +2,7 @@
 import { CONFIG_FILE, loadConfig, writeJson } from './lib.mjs';
 
 const [action, key, ...rest] = process.argv.slice(2);
-const ALLOWED_KEYS = ['lesson', 'share', 'autosave', 'student_name', 'report_url'];
+const ALLOWED_KEYS = ['lesson', 'share', 'autosave', 'student_name'];
 
 function parseValue(raw) {
   if (raw === 'true') return true;

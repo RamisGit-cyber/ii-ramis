@@ -1,10 +1,9 @@
 // SessionEnd: короткий итог сессии в ~/.ii-ramis/progress.jsonl.
 // В итог НЕ попадают: код, содержимое файлов, тексты команд, пути к файлам, тексты сообщений ученика.
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { PROGRESS_FILE, ensureDataDir, loadConfig, readStdinJson, redact } from './lib.mjs';
+import { flushQueue } from './report.mjs';
 
 const STUCK_THRESHOLD = 3;
 const BASH_CATEGORIES = [
@@ -108,6 +107,7 @@ function summarize(transcriptPath, config, input) {
 
   return {
     v: 1,
+    consent: config.share === true, // согласие на момент записи: без него запись никогда не уйдёт
     ts: new Date().toISOString(),
     session_id: input.session_id || null,
     student_id: config.student_id,
@@ -130,21 +130,7 @@ function summarize(transcriptPath, config, input) {
   };
 }
 
-function sendIfAllowed(record, config) {
-  const url = process.env.IIRAMIS_REPORT_URL || config.report_url;
-  if (config.share !== true || !url) return;
-  const headers = ['-H', 'content-type: application/json'];
-  if (process.env.IIRAMIS_REPORT_TOKEN) headers.push('-H', `authorization: Bearer ${process.env.IIRAMIS_REPORT_TOKEN}`);
-  // Молчаливый отказ: нет сети, нет curl, сервер не ответил за 5 секунд — ученик ничего не видит.
-  spawnSync('curl', ['-s', '-o', os.devNull, '-m', '5', '-X', 'POST', ...headers, '--data-binary', '@-', url], {
-    input: JSON.stringify(record),
-    timeout: 6000,
-    stdio: ['pipe', 'ignore', 'ignore'],
-    windowsHide: true,
-  });
-}
-
-function main() {
+async function main() {
   const input = readStdinJson();
   if (!input.transcript_path || !fs.existsSync(input.transcript_path)) return;
   const config = loadConfig();
@@ -152,11 +138,11 @@ function main() {
   if (record.prompts === 0 && Object.keys(record.tools).length === 0) return; // пустая сессия
   ensureDataDir();
   fs.appendFileSync(PROGRESS_FILE, JSON.stringify(record) + '\n');
-  sendIfAllowed(record, config);
+  await flushQueue(config);
 }
 
 try {
-  main();
+  await main();
 } catch (error) {
   console.error(`ii-ramis session-end: ${error.message}`);
 }
