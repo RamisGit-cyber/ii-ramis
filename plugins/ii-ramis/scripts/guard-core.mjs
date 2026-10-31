@@ -4,7 +4,7 @@ import { parseShell } from './shell-parse.mjs';
 import { checkDeletion } from './delete-rules.mjs';
 import {
   checkSecrets, checkEnvironmentDump, checkGit, checkDatabase, checkPipeToShell, checkSelfApproval,
-  checkInlineCode, checkUnverifiableReads,
+  checkInterpreters, checkUnverifiableReads,
 } from './guard-rules.mjs';
 import { checkProtectedShell, checkProtectedFileWrite } from './protect-rules.mjs';
 
@@ -50,7 +50,7 @@ function shellReason(toolName, toolInput, cwd) {
     checkDeletion(parsed.commands, cwd) ||
     checkGit(parsed.commands) ||
     checkPipeToShell(parsed.commands) ||
-    checkInlineCode(parsed.commands) ||
+    checkInterpreters(parsed.commands, cwd) ||
     checkUnverifiableReads(parsed.commands) ||
     checkDatabase(command);
   if (reason) return reason;

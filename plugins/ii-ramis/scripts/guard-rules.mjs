@@ -1,5 +1,8 @@
 // Правила охранника: ключи и пароли, git, скрипты из интернета, базы данных, переменные окружения.
-import { tokenMentionsSecret } from './lib.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { tokenMentionsSecret, realpathNearest } from './lib.mjs';
 import { verbName, commandIndex, isAssignment, FETCH_NAMES } from './shell-parse.mjs';
 
 const TRUSTED_HOSTS = new Set([
@@ -227,52 +230,75 @@ export function checkPipeToShell(commands) {
   return null;
 }
 
-// ---- Код внутри интерпретаторов: по умолчанию запрещён, кроме коротких безобидных однострочников ----
-const SAFE_ONE_LINER = /^\s*(?:import (?:sys|platform);\s*)?(?:print\(\s*(?:\d+|(["'])[\w .,:!-]*\1|sys\.version|sys\.version_info|platform\.[a-z_]+\(\))\s*\)|console\.log\(\s*(?:\d+|(["'])[\w .,:!-]*\2|process\.version|process\.versions\.node|process\.platform)\s*\)|process\.version|process\.versions\.node|process\.platform)\s*;?\s*$/;
-const INTERPRETER_VERBS = /^(python[\d.]*|node|nodejs|bun|deno|ruby|perl|php)$/;
-const POWERSHELL_CODE_FLAG = /^-(c(o(m(m(a(n(d)?)?)?)?)?)?|e(c|nc(o(d(e(d(c(o(m(m(a(n(d)?)?)?)?)?)?)?)?)?)?)?)?)([:=].*)?$/i;
+// ---- Интерпретаторы: белый список. Код в командной строке не разбираем, а запрещаем целиком ----
+// Разрешено только: <интерпретатор> <файл внутри проекта> [аргументы], --version/-V/-v, python -m pip|venv|http.server,
+// PowerShell -NoProfile -File <файл в проекте>. Всё остальное: «запиши код в файл проекта и запусти файл».
+const INTERPRETER_VERBS = /^(python[\d.]*|node|nodejs|bun|deno|ruby|perl|php|pwsh|powershell)$/;
+const VERSION_FLAGS = new Set(['--version', '-V', '-v']);
+const PYTHON_MODULES = new Set(['pip', 'venv', 'http.server']);
+const POWERSHELL_PRE_FLAGS = /^-(noprofile|noninteractive|nologo)$/i;
+const INTERPRETER_DENY = 'интерпретатор запускает код из командной строки или с флагами, которые я не проверяю: запиши код в файл проекта и запусти файл';
 
-// Ищет флаг «вот код» в любой записи (-c, -cCODE, -uc, --eval=CODE, -pe). Возвращает {code} или null.
-function inlineCodeOf(name, args) {
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i];
-    let match = null;
-    if (/^python/.test(name) && /^-[A-Za-z]/.test(arg)) {
-      for (let j = 1; j < arg.length && /[A-Za-z]/.test(arg[j]); j += 1) {
-        if (arg[j] === 'm') break;
-        if (arg[j] === 'c') { match = [null, arg.slice(j + 1)]; break; }
-      }
-    } else if (/^(node|nodejs|bun)$/.test(name)) {
-      match = arg.match(/^--(?:eval|print)(?:=(.*))?$/) || arg.match(/^-(?:pe|ep|e|p)(.*)$/);
-    } else if (name === 'ruby') match = arg.match(/^-[A-Za-z]*e(.*)$/);
-    else if (name === 'perl') match = arg.match(/^-[A-Za-z]*[eE](.*)$/);
-    else if (name === 'php') match = arg.match(/^-r(.*)$/);
-    if (match) return { code: match[1] ? match[1] : args[i + 1] };
-  }
-  return null;
+function isScriptInProject(rawFile, cwd, extension) {
+  const file = rawFile && rawFile.replace(/\$\{?CLAUDE_PLUGIN_ROOT\}?/g, path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'));
+  if (!file || !extension.test(file) || file.startsWith('-') || /[$`*?[\]{}~<>]/.test(file) || /^[a-z][a-z0-9+.-]*:/i.test(file)) return false; // схемы http:, data:, npm:, jsr: — не файл
+  const resolved = path.resolve(cwd, file);
+  const inside = (child, parent) => {
+    const relative = path.relative(parent, child);
+    return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
+  };
+  const pluginScripts = path.resolve(path.dirname(fileURLToPath(import.meta.url)));
+  const isRealFile = (target) => {
+    try { return fs.statSync(target).isFile(); } catch { return false; }
+  };
+  if (inside(resolved, pluginScripts)) return isRealFile(resolved);
+  // файл обязан существовать внутри проекта (по реальному пути): «запиши код в файл» и запусти отдельным шагом
+  return inside(resolved, cwd) && inside(realpathNearest(resolved), realpathNearest(cwd)) && isRealFile(resolved);
 }
 
-export function checkInlineCode(commands) {
+const SCRIPT_EXTENSION = {
+  python: /\.py$/i, node: /\.(m?js|cjs|tsx?|jsx)$/i, ruby: /\.rb$/i, perl: /\.pl$/i, php: /\.php$/i, powershell: /\.ps1$/i,
+};
+const BUN_PACKAGE_COMMANDS = new Set(['install', 'i', 'add', 'remove', 'rm', 'update', 'pm']);
+const CD_VERBS = new Set(['cd', 'pushd', 'set-location', 'sl', 'chdir']);
+
+function extensionFor(name) {
+  if (/^python/.test(name)) return SCRIPT_EXTENSION.python;
+  if (/^(node|nodejs|bun|deno)$/.test(name)) return SCRIPT_EXTENSION.node;
+  if (name === 'pwsh' || name === 'powershell') return SCRIPT_EXTENSION.powershell;
+  return SCRIPT_EXTENSION[name];
+}
+
+function interpreterAllowed(name, args, cwd) {
+  if (args.length === 1 && VERSION_FLAGS.has(args[0])) return true;
+  if (name === 'pwsh' || name === 'powershell') {
+    let i = 0;
+    while (i < args.length && POWERSHELL_PRE_FLAGS.test(args[i])) i += 1;
+    return /^-file$/i.test(args[i] || '') && isScriptInProject(args[i + 1], cwd, extensionFor(name));
+  }
+  if (/^python/.test(name) && args[0] === '-m') return PYTHON_MODULES.has(args[1]);
+  const extension = extensionFor(name);
+  if (name === 'deno') return args[0] === 'run' && isScriptInProject(args[1], cwd, extension);
+  if (name === 'bun') {
+    if (BUN_PACKAGE_COMMANDS.has(args[0])) return true; // пакетный менеджер, а не запуск кода
+    if (args[0] === 'run') return isScriptInProject(args[1], cwd, extension) || /^[\w:-]+$/.test(args[1] || ''); // файл или скрипт из package.json
+  }
+  return isScriptInProject(args[0], cwd, extension);
+}
+
+export function checkInterpreters(commands, cwd) {
+  let movedDirectory = false;
   for (const cmd of commands) {
     const start = commandIndex(cmd.tokens);
     if (start === -1) continue;
     const name = verbName(cmd.tokens[start]);
-    const args = cmd.tokens.slice(start + 1);
-    if ((name === 'pwsh' || name === 'powershell') && args.some((a) => POWERSHELL_CODE_FLAG.test(a))) {
-      return `код в ${name} (-Command/-EncodedCommand) запрещён: не могу проверить`;
-    }
+    if (CD_VERBS.has(name)) movedDirectory = true;
     if (!INTERPRETER_VERBS.test(name)) continue;
-    if (cmd.heredoc) return `код для ${name} передан через heredoc: не могу проверить`;
-    if (name === 'deno' && args[0] === 'eval') return 'встроенный код deno: не могу проверить';
-    const inline = inlineCodeOf(name, args);
-    if (inline) {
-      if (inline.code === undefined || !SAFE_ONE_LINER.test(inline.code)) {
-        return `встроенный код в ${name} запрещён (разрешены только однострочники вроде печати версии)`;
-      }
-    } else if (cmd.prev && !args.some((a) => !a.startsWith('-')) && !args.includes('-m')) {
-      const fromFetch = cmd.prev.tokens.some((t) => FETCH_NAMES.has(verbName(t)));
-      if (!fromFetch) return `код для ${name} приходит из конвейера: не могу проверить`;
-    }
+    if (movedDirectory) return INTERPRETER_DENY; // cd перед запуском: относительный путь означает уже не тот файл
+    const prefix = cmd.tokens.slice(0, start);
+    if (prefix.some((t) => isAssignment(t) || verbName(t) === 'env')) return INTERPRETER_DENY; // VAR=x python3 ..., env VAR=x node ...
+    if (cmd.heredoc || cmd.tokens.some((t) => /^\d*<</.test(t) || /^\d*<(?!\()/.test(t))) return INTERPRETER_DENY; // любой ввод через <, <<, <<<
+    if (!interpreterAllowed(name, cmd.tokens.slice(start + 1), cwd)) return INTERPRETER_DENY;
   }
   return null;
 }

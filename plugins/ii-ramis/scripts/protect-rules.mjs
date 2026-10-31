@@ -70,6 +70,7 @@ export function isProtectedPath(raw, cwd) {
   const text = expand(String(raw));
   if (/\{[^{}]*\.\.[^{}]*\}/.test(text)) return true; // {1..3}: не раскрываем, значит считаем защищённым
   const variants = expandBraces(text);
+  if (variants.length >= 50) return true; // упёрлись в лимит раскрытия скобок: не проверили всё, значит защищено
   if (variants.length > 1 || variants[0] !== text) return variants.some((variant) => isProtectedPath(variant, cwd));
   if (text.startsWith('-')) {
     const eq = text.indexOf('='); // --output=путь
@@ -157,10 +158,10 @@ export function checkProtectedShell(commands, cwd) {
     const first = commandIndex(tokens);
     if (hasUnresolvableWriteTarget(tokens, first)) return 'запись в путь из переменной: не могу проверить, что это не защищённый файл';
     const isCd = first !== -1 && CD_VERBS.has(verbName(tokens[first]));
-    if (isCd) continue; // сам cd безвреден: что делать дальше в этой папке, решает movesIntoProtected
     const mentioned = tokens
       .map((token, index) => (!cmd.consumed.has(index) && isProtectedPath(stripRedirect(token), cwd) ? index : -1))
       .filter((index) => index !== -1);
+    if (isCd && !mentioned.some((i) => isRedirectTarget(tokens, i))) continue; // сам cd безвреден; перенаправление в защищённое файл — нет
     const redirected = tokens.some((t, i) => isRedirectTarget(tokens, i));
     if (movesIntoProtected && !isCd && (first === -1 || !readOnlyUse(tokens, first) || redirected)) return REASON;
     if (mentioned.length === 0) continue;
