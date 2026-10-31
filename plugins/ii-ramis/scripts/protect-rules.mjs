@@ -3,7 +3,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { realpathNearest } from './lib.mjs';
+import { realpathNearest, expandBraces } from './lib.mjs';
 import { verbName, commandIndex } from './shell-parse.mjs';
 
 export const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -19,6 +19,10 @@ const READ_VERBS = new Set([
   'jq', 'type', 'get-content', 'gc', 'select-string', 'sls', 'test-path', 'get-childitem', 'gci', 'get-item', 'gi',
 ]);
 const READ_ONLY_GIT = new Set(['status', 'diff', 'log', 'show', 'ls-files', 'check-ignore']);
+const SAFE_GIT_FLAGS = new Set([
+  '--', '-n', '-s', '-b', '-p', '-a', '--stat', '--shortstat', '--numstat', '--summary', '--name-only', '--name-status',
+  '--oneline', '--short', '--porcelain', '--cached', '--staged', '--no-color', '--graph', '--decorate', '--patch', '--all', '--no-pager',
+]);
 const OUTPUT_OR_EXEC_FLAGS = /^(--output|-o|--pre|--exec|--ext-diff|--textconv|--open-files-in-pager)(=|$)/;
 const WRITE_VERBS = new Set([
   'cp', 'mv', 'tee', 'rm', 'sed', 'ln', 'install', 'dd', 'truncate', 'touch', 'copy', 'move', 'del', 'erase', 'rd', 'rmdir',
@@ -47,12 +51,12 @@ function insideOrEqual(child, parent) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+// Принцип: каталоги ~/.claude, ~/.ii-ramis и папка плагина защищены целиком, плюс settings*.json в любом проекте.
 function matchesProtected(candidate) {
   const lower = candidate.toLowerCase();
-  const inDir = (dir) => insideOrEqual(lower, dir.toLowerCase());
-  if (inDir(PLUGIN_ROOT) || inDir(path.join(HOME, '.claude', 'plugins')) || inDir(realpathNearest(PLUGIN_ROOT))) return true;
-  if (same(path.basename(path.dirname(candidate)), '.claude') && path.basename(candidate).toLowerCase().startsWith('settings')) return true;
-  return same(candidate, path.join(DATA_DIR, 'config.json')) || same(candidate, path.join(HOME, '.ii-ramis', 'config.json'));
+  const dirs = [...PROTECTED_DIRS, realpathNearest(PLUGIN_ROOT)];
+  if (dirs.some((dir) => insideOrEqual(lower, dir.toLowerCase()))) return true;
+  return same(path.basename(path.dirname(candidate)), '.claude') && path.basename(candidate).toLowerCase().startsWith('settings');
 }
 
 // Шаблон со звёздочкой, который мог бы раскрыться внутри защищённой папки (~/.claude/*, ~/.cl*/settings.json).
@@ -64,6 +68,9 @@ function globProtected(text, cwd) {
 
 export function isProtectedPath(raw, cwd) {
   const text = expand(String(raw));
+  if (/\{[^{}]*\.\.[^{}]*\}/.test(text)) return true; // {1..3}: не раскрываем, значит считаем защищённым
+  const variants = expandBraces(text);
+  if (variants.length > 1 || variants[0] !== text) return variants.some((variant) => isProtectedPath(variant, cwd));
   if (text.startsWith('-')) {
     const eq = text.indexOf('='); // --output=путь
     return eq > 0 ? isProtectedPath(text.slice(eq + 1), cwd) : false;
@@ -77,7 +84,7 @@ export function isProtectedPath(raw, cwd) {
 
 function isProtectedDir(raw, cwd) {
   const text = expand(String(raw));
-  if (/[$`]/.test(text)) return false;
+  if (/[$`*?[\]{}]/.test(text)) return true; // неразрешимая цель cd считается защищённой
   const resolved = path.resolve(cwd, text);
   return [resolved, realpathNearest(resolved)].some((c) =>
     PROTECTED_DIRS.some((dir) => insideOrEqual(c.toLowerCase(), dir.toLowerCase())) || /(^|[/\\])\.claude([/\\]|$)/i.test(c));
@@ -123,8 +130,8 @@ function readOnlyUse(tokens, first) {
   if (READ_VERBS.has(name)) return true;
   if (name !== 'git') return false;
   const rest = tokens.slice(first + 1);
-  if (rest.some((t) => t === '-c' || /^--(exec-path|config-env)/.test(t))) return false;
-  return READ_ONLY_GIT.has(rest.find((t) => !t.startsWith('-')));
+  const flagsAreSafe = rest.every((t) => !t.startsWith('-') || SAFE_GIT_FLAGS.has(t) || /^-\d+$/.test(t));
+  return flagsAreSafe && READ_ONLY_GIT.has(rest.find((t) => !t.startsWith('-')));
 }
 
 function isRedirectTarget(tokens, index) {
@@ -150,6 +157,7 @@ export function checkProtectedShell(commands, cwd) {
     const first = commandIndex(tokens);
     if (hasUnresolvableWriteTarget(tokens, first)) return 'запись в путь из переменной: не могу проверить, что это не защищённый файл';
     const isCd = first !== -1 && CD_VERBS.has(verbName(tokens[first]));
+    if (isCd) continue; // сам cd безвреден: что делать дальше в этой папке, решает movesIntoProtected
     const mentioned = tokens
       .map((token, index) => (!cmd.consumed.has(index) && isProtectedPath(stripRedirect(token), cwd) ? index : -1))
       .filter((index) => index !== -1);

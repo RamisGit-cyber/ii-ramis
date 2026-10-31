@@ -84,7 +84,7 @@ export function mentionsSecretPath(text) {
 const SECRET_DOTFILES = ['.env', '.env.local', '.env.production', '.dev.vars', '.npmrc', '.netrc', '.pgpass', '.git-credentials'];
 const SECRET_NAMES = ['server.pem', 'private.key', 'id_rsa', 'id_ed25519', 'credentials.json', 'secrets.json', 'service-account.json'];
 
-function expandBraces(token, budget = 50) {
+export function expandBraces(token, budget = 50) {
   const match = String(token).match(/^(.*?)\{([^{}]*)\}(.*)$/s);
   if (!match || !match[2].includes(',')) return [String(token)];
   const results = [];

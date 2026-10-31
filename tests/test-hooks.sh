@@ -585,6 +585,34 @@ expect 2 "Write через симлинк на settings.json" "$(guard_home "{\"
 expect 2 "echo > симлинк на settings.json" "$(guard_home "{\"tool_name\":\"Bash\",\"cwd\":\"$WORK/linkproj\",\"tool_input\":{\"command\":\"echo {} > innocent.json\"}}")"
 expect 0 "Write обычного файла рядом (HOME подменён)" "$(guard_home "{\"tool_name\":\"Write\",\"cwd\":\"$WORK/linkproj\",\"tool_input\":{\"file_path\":\"$WORK/linkproj/other.json\"}}")"
 
+echo "== защита хуков, раунд 3: каталоги целиком, скобки, git-флаги, cd, ссылки =="
+run_bash_list 2 \
+  'echo x > ~/.claude/memory.md' \
+  'rm ~/.claude/projects/x' \
+  'mv ~/.claude/skills foo' \
+  'echo x > ~/.ii-ramis/state.json' \
+  'cp x ~/.claude/{a,b}' \
+  'cp x ~/.{claude,foo}/y' \
+  'cp x ~/{1..3}' \
+  'cd $X && echo x > f' \
+  'cd ~/.cl* && echo x > f' \
+  'cd ~/.{claude,z} && echo x > f' \
+  'git diff --out=.claude/settings.json' \
+  'git log --ex=y .claude/settings.json' \
+  'git diff --ext-diff .claude/settings.json' \
+  'git diff --stat --output=.claude/settings.json' \
+  'ln -s ~/.claude/settings.json link' \
+  'ln ~/.claude/settings.json hard'
+run_ps_list 2 \
+  'New-Item -ItemType SymbolicLink -Path l -Target ~/.claude/settings.json'
+expect 2 "Write в ~/.claude/memory" "$(guard Write file_path "$HOME/.claude/memory/x.md" "$WORK/proj")"
+expect 2 "Write в ~/.ii-ramis/state.json" "$(guard Write file_path "$HOME/.ii-ramis/state.json" "$WORK/proj")"
+run_bash_list 0 \
+  'cat ~/.claude/CLAUDE.md' \
+  'git diff --stat' \
+  'git log --oneline -5' \
+  'ls ~/.claude/skills'
+
 echo "== hooks.json: матчер покрывает инструменты с путями =="
 for tool in Bash PowerShell Read NotebookRead Grep Glob Edit Write MultiEdit NotebookEdit mcp__server__tool; do
   node -e '

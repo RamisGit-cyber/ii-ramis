@@ -2,6 +2,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { realpathNearest } from './lib.mjs';
+import { isProtectedPath } from './protect-rules.mjs';
 import { verbName, commandIndex, isAssignment } from './shell-parse.mjs';
 
 const SAFE_DIR_NAMES = new Set([
@@ -129,11 +130,12 @@ function checkFind(tokens, index, cwd) {
 
 // Симлинк на чужую папку или с именем «мусорной» папки (node_modules -> ~) обманул бы проверку удаления.
 function checkLinkCreation(name, rest, cwd) {
-  const isLn = name === 'ln' && rest.some((a) => /^-[a-zA-Z]*s|^--symbolic/.test(a));
+  const isLn = name === 'ln'; // и жёсткие ссылки тоже: запись в них меняет оригинал
   const isNewItem = (name === 'new-item' || name === 'ni') && rest.some((a) => /^(symboliclink|junction|hardlink)$/i.test(a));
   if (!isLn && !isNewItem && name !== 'mklink') return null;
   const operands = rest.filter((a) => !isFlag(a) && !/^(symboliclink|junction|hardlink)$/i.test(a));
   for (const operand of operands) {
+    if (isProtectedPath(operand, cwd)) return `ссылка на защищённое место (${operand}): выключить защиту может только ученик сам в настройках`;
     if (SAFE_DIR_NAMES.has(path.basename(operand.replace(/[/\\]+$/, '')))) return `создание ссылки с именем «мусорной» папки (${operand})`;
     const outside = checkDeleteTarget(operand, cwd, false);
     if (outside) return `создание символической ссылки: ${outside}`;
