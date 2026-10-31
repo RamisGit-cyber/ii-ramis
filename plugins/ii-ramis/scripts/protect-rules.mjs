@@ -12,8 +12,18 @@ const DATA_DIR = process.env.IIRAMIS_HOME || path.join(HOME, '.ii-ramis');
 const STUDENT_ONLY = 'выключить защиту может только ученик сам в настройках';
 const REASON = `изменение настроек Claude Code, папки плагина или конфига ИИ Рамис: ${STUDENT_ONLY}`;
 
-const PROTECTED_PATTERNS = [/\.claude[/\\]settings/i, /\.claude[/\\]plugins(?=$|[/\\\s'"*])/i, /\.ii-ramis[/\\]config\.json/i];
-const PROTECTED_DIRS = [PLUGIN_ROOT, path.join(HOME, '.claude'), DATA_DIR, path.join(HOME, '.ii-ramis')];
+// Защищено только то, что отключает или подменяет защиту. Память, skills, agents, commands, CLAUDE.md и данные claude-mem
+// (они лежат в ~/.claude-mem) ученику и Claude писать можно.
+const PROTECTED_PATTERNS = [
+  /\.claude[/\\]settings/i, /\.claude[/\\](plugins|hooks)(?=$|[/\\\s'"*])/i, /\.claude\.json(?=$|[\s'"])/i, /\.ii-ramis[/\\]config\.json/i,
+];
+const PROTECTED_DIRS = [PLUGIN_ROOT, path.join(HOME, '.claude', 'plugins'), path.join(HOME, '.claude', 'hooks')];
+const PROTECTED_FILES = [
+  path.join(HOME, '.claude.json'), path.join(DATA_DIR, 'config.json'), path.join(HOME, '.ii-ramis', 'config.json'),
+  path.join(HOME, '.claude', 'settings.json'), path.join(HOME, '.claude', 'settings.local.json'),
+];
+// Папки, куда нельзя «войти» через cd и потом писать по относительным путям.
+const GUARDED_WORKING_DIRS = [path.join(HOME, '.claude'), DATA_DIR, path.join(HOME, '.ii-ramis')];
 const READ_VERBS = new Set([
   'cat', 'less', 'more', 'head', 'tail', 'grep', 'egrep', 'rg', 'ls', 'dir', 'stat', 'test', '[', '[[', 'wc', 'file', 'diff',
   'jq', 'type', 'get-content', 'gc', 'select-string', 'sls', 'test-path', 'get-childitem', 'gci', 'get-item', 'gi',
@@ -51,11 +61,12 @@ function insideOrEqual(child, parent) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
-// Принцип: каталоги ~/.claude, ~/.ii-ramis и папка плагина защищены целиком, плюс settings*.json в любом проекте.
+// Защищены: папка плагина, ~/.claude/plugins и hooks, ~/.claude.json, config.json ИИ Рамис, settings*.json в любом .claude.
 function matchesProtected(candidate) {
   const lower = candidate.toLowerCase();
   const dirs = [...PROTECTED_DIRS, realpathNearest(PLUGIN_ROOT)];
   if (dirs.some((dir) => insideOrEqual(lower, dir.toLowerCase()))) return true;
+  if (PROTECTED_FILES.some((file) => same(candidate, file))) return true;
   return same(path.basename(path.dirname(candidate)), '.claude') && path.basename(candidate).toLowerCase().startsWith('settings');
 }
 
@@ -63,7 +74,9 @@ function matchesProtected(candidate) {
 function globProtected(text, cwd) {
   const prefix = text.slice(0, text.search(/[*?[]/));
   const resolved = path.resolve(cwd, prefix || '.');
-  return PROTECTED_DIRS.some((dir) => dir.toLowerCase().startsWith(resolved.toLowerCase()) || insideOrEqual(resolved, dir));
+  return [...PROTECTED_DIRS, ...PROTECTED_FILES, ...GUARDED_WORKING_DIRS].some((target) =>
+    target.toLowerCase().startsWith(resolved.toLowerCase()) || insideOrEqual(resolved, target)) &&
+    ![...GUARDED_WORKING_DIRS].some((dir) => same(resolved, path.join(dir, 'skills')) || same(resolved, path.join(dir, 'projects')));
 }
 
 export function isProtectedPath(raw, cwd) {
@@ -88,7 +101,8 @@ function isProtectedDir(raw, cwd) {
   if (/[$`*?[\]{}]/.test(text)) return true; // неразрешимая цель cd считается защищённой
   const resolved = path.resolve(cwd, text);
   return [resolved, realpathNearest(resolved)].some((c) =>
-    PROTECTED_DIRS.some((dir) => insideOrEqual(c.toLowerCase(), dir.toLowerCase())) || /(^|[/\\])\.claude([/\\]|$)/i.test(c));
+    PROTECTED_DIRS.some((dir) => insideOrEqual(c.toLowerCase(), dir.toLowerCase())) ||
+    GUARDED_WORKING_DIRS.some((dir) => same(c, dir)) || same(path.basename(c), '.claude'));
 }
 
 function resolvesToScript(token, names, cwd) {
@@ -100,7 +114,8 @@ function resolvesToScript(token, names, cwd) {
 
 function isConfigSet(args) {
   return args.length === 3 && args[0] === 'set' && (
-    (args[1] === 'lesson' && /^\d{1,2}$/.test(args[2])) || (args[1] === 'autosave' && /^(true|false)$/.test(args[2])));
+    (args[1] === 'lesson' && /^\d{1,2}$/.test(args[2])) || (args[1] === 'autosave' && /^(true|false)$/.test(args[2])) ||
+    (args[1] === 'share' && args[2] === 'false')); // выключить отправку можно через чат, включить — только установщиком или руками
 }
 
 function isPluginCommand(tokens) {

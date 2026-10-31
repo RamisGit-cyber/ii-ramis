@@ -222,6 +222,10 @@ export function checkPipeToShell(commands) {
     if (start === -1 || !isInterpreterName(verbName(cmd.tokens[start]))) continue;
     const upstream = [];
     for (let prev = cmd.prev; prev; prev = prev.prev) upstream.push(prev);
+    // $(...) или бэктики в любой предыдущей стадии конвейера: что уйдёт в интерпретатор, заранее не видно
+    if (upstream.some((c) => c.subs.length > 0 || c.tokens.some((t) => /\$\(|`/.test(t)))) {
+      return 'в интерпретатор подаётся результат подстановки $(...) или `...`: не могу проверить, что именно запустится';
+    }
     const fetchers = [...upstream, ...cmd.subs].filter((c) => c.tokens.some((t) => FETCH_NAMES.has(verbName(t))));
     if (fetchers.some((c) => !fetchIsTrusted(c.tokens))) {
       return 'запуск скрипта, скачанного из интернета, с непроверенного адреса или с нестандартными флагами';
