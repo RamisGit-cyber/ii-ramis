@@ -2,7 +2,7 @@
 
 ИИ Рамис — это ИИ-помощник Рамиса Жолдошева, автора курса. Он живёт внутри Claude Code (вкладка Code в приложении Claude Desktop или команда `claude`), объясняет простыми словами, сам ставит и чинит всё нужное и проверяет результат, прежде чем сказать «готово».
 
-> Идея и часть подхода: [vibe-coding-mentor](https://github.com/azamat-raimbekov) Азамата Раймбекова, лицензия MIT. См. `NOTICE.md`.
+> Идея и часть подхода: [vibe-coding-mentor](https://github.com/AzamatRaimbekov/vibe-coding-mentor) Азамата Раймбекова, лицензия MIT. См. `NOTICE.md`.
 
 ## Установка в 3 шага
 
