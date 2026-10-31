@@ -1,7 +1,7 @@
 // Правила про удаление файлов. Работают по разобранным командам (shell-parse.mjs), а не по сырой строке.
-import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { realpathNearest } from './lib.mjs';
 import { verbName, commandIndex, isAssignment } from './shell-parse.mjs';
 
 const SAFE_DIR_NAMES = new Set([
@@ -51,22 +51,6 @@ function resolveTarget(target, cwd) {
     return path.join(os.homedir(), target.slice(1));
   }
   return path.resolve(cwd, target);
-}
-
-// Ближайший существующий родитель + реальный путь: так видны симлинки (node_modules -> ~).
-function realpathNearest(target) {
-  let current = target;
-  const rest = [];
-  for (;;) {
-    try {
-      return path.join(fs.realpathSync(current), ...rest.reverse());
-    } catch {
-      const parent = path.dirname(current);
-      if (parent === current) return target;
-      rest.push(path.basename(current));
-      current = parent;
-    }
-  }
 }
 
 // Проверка одной цели удаления. recursive: папки можно только мусорные внутри проекта.

@@ -463,7 +463,14 @@ run_bash_list 2 \
   "node \"$S/guard.mjs\"" \
   "node \"$S/config.mjs\" set share true" \
   "node \"$S/config.mjs\" set lesson 3 --force" \
-  "bash \"$S/install.sh\" ~/.claude/settings.json"
+  "bash \"$S/install.sh\" ~/.claude/settings.json" \
+  "bash \"$S/install.sh\"" \
+  "node \"$S/setup-settings.mjs\"" \
+  "FOO=1 bash \"$S/diagnose.sh\"" \
+  "sudo bash \"$S/diagnose.sh\"" \
+  "bash \"$S/diagnose.sh\" a b" \
+  "echo x | bash \"$S/diagnose.sh\"" \
+  "FOO=1 node \"$S/config.mjs\" set lesson 3"
 run_ps_list 2 \
   'Set-Content $HOME\.claude\settings.json "{}"' \
   'Out-File ~/.claude/settings.json' \
@@ -485,12 +492,9 @@ run_bash_list 0 \
   'ls ~/.claude/plugins' \
   'grep hooks .claude/settings.json' \
   'jq . ~/.claude/settings.json' \
-  'git add .claude/settings.json' \
   'cat ~/.ii-ramis/config.json' \
   "node \"$S/config.mjs\" set lesson 3" \
   "node \"$S/config.mjs\" set autosave false" \
-  "bash \"$S/install.sh\"" \
-  "node \"$S/setup-settings.mjs\"" \
   "bash \"$S/diagnose.sh\" \"\$PWD\"" \
   'bash "${CLAUDE_PLUGIN_ROOT}/scripts/diagnose.sh" "$PWD"' \
   'node "${CLAUDE_PLUGIN_ROOT}/scripts/config.mjs" set lesson 5' \
@@ -500,6 +504,40 @@ run_ps_list 0 \
   'Get-Content ~/.claude/settings.json'
 expect 0 "Read: ~/.claude/settings.json" "$(guard Read file_path "$HOME/.claude/settings.json" "$WORK/proj")"
 expect 0 "Write: обычный файл проекта" "$(guard Write file_path "$WORK/proj/src/a.ts" "$WORK/proj")"
+
+echo "== защита хуков, второй раунд =="
+run_bash_list 2 \
+  'git add .claude/settings.json' \
+  'git commit -am x .claude/settings.json' \
+  'git diff --output=.claude/settings.json' \
+  'git -c core.pager=x diff .claude/settings.json' \
+  'rg --pre ./evil foo .claude/settings.json' \
+  'echo x > ~/.cl*/settings.json' \
+  'cp x ~/.claude/*' \
+  'echo x > ~/.ii-ramis/c*' \
+  'cd ~/.claude && echo {} > settings.json' \
+  'cd ~/.claude; cp /tmp/x settings.json' \
+  'pushd ~/.claude && sed -i s/a/b/ settings.json' \
+  'cd ~/.ii-ramis && echo {} > config.json' \
+  'echo x > "$CFG"' \
+  'cp x "$TARGET"' \
+  'tee $F < x' \
+  'mv x ${DEST}'
+run_ps_list 2 \
+  'Set-Location ~/.claude; Set-Content settings.json "{}"' \
+  'Set-Content $TARGET "{}"'
+run_bash_list 0 \
+  'cd ~/.claude && ls' \
+  'cd ~/.claude && cat settings.json' \
+  'git diff --stat' \
+  'git status'
+# настоящий симлинк на защищённый файл: HOME подменён на тестовый, чтобы не трогать реальный
+FH="$WORK/fh"; mkdir -p "$FH/.claude" "$WORK/linkproj"; echo '{}' > "$FH/.claude/settings.json"
+ln -s "$FH/.claude/settings.json" "$WORK/linkproj/innocent.json"
+guard_home() { printf '%s' "$1" | HOME="$FH" node "$S/guard.mjs" >/dev/null 2>&1; echo $?; }
+expect 2 "Write через симлинк на settings.json" "$(guard_home "{\"tool_name\":\"Write\",\"cwd\":\"$WORK/linkproj\",\"tool_input\":{\"file_path\":\"$WORK/linkproj/innocent.json\"}}")"
+expect 2 "echo > симлинк на settings.json" "$(guard_home "{\"tool_name\":\"Bash\",\"cwd\":\"$WORK/linkproj\",\"tool_input\":{\"command\":\"echo {} > innocent.json\"}}")"
+expect 0 "Write обычного файла рядом (HOME подменён)" "$(guard_home "{\"tool_name\":\"Write\",\"cwd\":\"$WORK/linkproj\",\"tool_input\":{\"file_path\":\"$WORK/linkproj/other.json\"}}")"
 
 echo "== hooks.json: матчер покрывает инструменты с путями =="
 for tool in Bash PowerShell Read NotebookRead Grep Glob Edit Write MultiEdit NotebookEdit mcp__server__tool; do

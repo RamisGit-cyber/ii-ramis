@@ -143,3 +143,19 @@ export function redact(text, maxLength = 100) {
     .trim()
     .slice(0, maxLength);
 }
+
+// Ближайший существующий родитель + реальный путь: так видны симлинки (node_modules -> ~).
+export function realpathNearest(target) {
+  let current = target;
+  const rest = [];
+  for (;;) {
+    try {
+      return path.join(fs.realpathSync(current), ...rest.reverse());
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return target;
+      rest.push(path.basename(current));
+      current = parent;
+    }
+  }
+}
