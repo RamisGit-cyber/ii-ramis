@@ -17,7 +17,11 @@ const REASON = `изменение настроек Claude Code, папки пл
 const PROTECTED_PATTERNS = [
   /\.claude[/\\]settings/i, /\.claude[/\\](plugins|hooks)(?=$|[/\\\s'"*])/i, /\.claude\.json(?=$|[\s'"])/i, /\.ii-ramis[/\\]config\.json/i,
 ];
-const PROTECTED_DIRS = [PLUGIN_ROOT, path.join(HOME, '.claude', 'plugins'), path.join(HOME, '.claude', 'hooks')];
+// ~/.ii-ramis защищена целиком (там же лежит установленный node), кроме файлов, которые пишут сами хуки.
+const PROTECTED_DIRS = [
+  PLUGIN_ROOT, path.join(HOME, '.claude', 'plugins'), path.join(HOME, '.claude', 'hooks'), DATA_DIR, path.join(HOME, '.ii-ramis'),
+];
+const HOOK_WRITTEN_FILES = [DATA_DIR, path.join(HOME, '.ii-ramis')].flatMap((dir) => [path.join(dir, 'state.json'), path.join(dir, 'progress.jsonl')]);
 const PROTECTED_FILES = [
   path.join(HOME, '.claude.json'), path.join(DATA_DIR, 'config.json'), path.join(HOME, '.ii-ramis', 'config.json'),
   path.join(HOME, '.claude', 'settings.json'), path.join(HOME, '.claude', 'settings.local.json'),
@@ -61,12 +65,15 @@ function insideOrEqual(child, parent) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
-// Защищены: папка плагина, ~/.claude/plugins и hooks, ~/.claude.json, config.json ИИ Рамис, settings*.json в любом .claude.
+// Защищены: папка плагина, ~/.claude/plugins и hooks, ~/.claude.json, ~/.ii-ramis (кроме state/progress), settings*.json в любом .claude и все папки выше них.
 function matchesProtected(candidate) {
   const lower = candidate.toLowerCase();
+  if (HOOK_WRITTEN_FILES.some((file) => same(candidate, file))) return false;
   const dirs = [...PROTECTED_DIRS, realpathNearest(PLUGIN_ROOT)];
   if (dirs.some((dir) => insideOrEqual(lower, dir.toLowerCase()))) return true;
   if (PROTECTED_FILES.some((file) => same(candidate, file))) return true;
+  // и наоборот: путь, внутри которого лежит защищённое (~, ~/.claude, /): mv, rm, cp -r, chmod задели бы и его
+  if ([...dirs, ...PROTECTED_FILES].some((target) => insideOrEqual(target.toLowerCase(), lower))) return true;
   return same(path.basename(path.dirname(candidate)), '.claude') && path.basename(candidate).toLowerCase().startsWith('settings');
 }
 

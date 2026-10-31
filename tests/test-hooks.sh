@@ -705,7 +705,7 @@ run_bash_list 2 \
   'ln ~/.claude/settings.json hard'
 run_ps_list 2 \
   'New-Item -ItemType SymbolicLink -Path l -Target ~/.claude/settings.json'
-for f in "$HOME/.claude/hooks/h.sh" "$HOME/.claude.json" "$HOME/.claude/plugins/cache/x/a.json"; do
+for f in "$HOME/.claude/hooks/h.sh" "$HOME/.claude.json" "$HOME/.claude/plugins/cache/x/a.json" "$HOME/.ii-ramis/node/bin/node" "$HOME/.ii-ramis/other.json" "$HOME" "$HOME/.claude" "$HOME/.ii-ramis"; do
   expect 2 "Write в защищённое: $f" "$(guard Write file_path "$f" "$WORK/proj")"
 done
 for f in "$HOME/.claude/projects/-p/memory/m.md" "$HOME/.claude/skills/my/SKILL.md" "$HOME/.claude/agents/a.md" "$HOME/.claude/commands/c.md" "$HOME/.claude/CLAUDE.md" "$HOME/.ii-ramis/state.json" "$HOME/.claude-mem/data.json"; do
@@ -713,6 +713,16 @@ for f in "$HOME/.claude/projects/-p/memory/m.md" "$HOME/.claude/skills/my/SKILL.
   expect 0 "Edit разрешён: $f" "$(guard Edit file_path "$f" "$WORK/proj")"
 done
 run_bash_list 2 \
+  'echo x > ~/.ii-ramis/node/bin/node' \
+  'cp evil ~/.ii-ramis/setup-settings.mjs' \
+  'echo x > ~/.ii-ramis/other.json' \
+  'mv ~/.claude /tmp/claude-bak' \
+  'cp -r ~/.claude /tmp/x' \
+  'chmod -R 777 ~' \
+  'chmod 000 ~/.claude' \
+  'mv ~ /tmp/home-bak' \
+  'mv ~/.ii-ramis /tmp/x' \
+  'cp -r x ~' \
   'echo x > ~/.claude.json' \
   'echo x > ~/.claude/hooks/h.sh' \
   'node -e 1 > ~/.claude.json' \
@@ -725,6 +735,7 @@ run_bash_list 0 \
   'echo x > ~/.claude/skills/my/SKILL.md' \
   'mv ~/.claude/skills foo' \
   'echo x > ~/.ii-ramis/state.json' \
+  'echo x >> ~/.ii-ramis/progress.jsonl' \
   'cp x ~/.claude/{a,b}' \
   'cp x ~/.{claude,foo}/y' \
   "node \"$S/config.mjs\" set share false"
