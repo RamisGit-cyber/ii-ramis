@@ -129,6 +129,29 @@ function isConfigSet(args, consent = {}) {
     (args[1] === 'student_name' && /^[\p{L}\p{N} ._-]{1,40}$/u.test(args[2]) && !/\S{21,}|sk-|ghp_|eyJ/.test(args[2]) && consent.nameAllowed?.() === true));
 }
 
+// Форма ключей (key-form.mjs): принимает только имена переменных, папку проекта и название окна. Значения ключей в команду
+// не попадают: сама форма их не принимает, а охранник пропускает только эти флаги и только в таком виде.
+const KEY_FORM_NAMES = /^[A-Z][A-Z0-9_]{0,63}(,[A-Z][A-Z0-9_]{0,63}){0,19}$/;
+const KEY_FORM_TITLE = /^[\p{L}\p{N} ._,:()«»-]{1,60}$/u;
+const KEY_FORM_UNSAFE_PATH = /[$`*?[\]{}<>|;&"'\\]|^-/;
+export function isKeyFormArgs(args) {
+  const seen = new Set();
+  for (let i = 0; i < args.length; i += 1) {
+    const flag = args[i];
+    if (seen.has(flag)) return false;
+    seen.add(flag);
+    if (flag === '--vercel') continue;
+    const value = args[i + 1];
+    i += 1;
+    if (value === undefined) return false;
+    if ((flag === '--vars' || flag === '--secret') && KEY_FORM_NAMES.test(value)) continue;
+    if (flag === '--title' && KEY_FORM_TITLE.test(value)) continue;
+    if (flag === '--project' && value.length > 0 && value.length < 400 && !KEY_FORM_UNSAFE_PATH.test(value)) continue;
+    return false;
+  }
+  return seen.has('--project') && (seen.has('--vars') || seen.has('--secret'));
+}
+
 function isPluginCommand(tokens) {
   const claude = tokens.findIndex((t) => verbName(t) === 'claude');
   if (tokens.some((t) => /^\/plugins?$/.test(t))) return true;
@@ -144,6 +167,9 @@ function isOwnScriptCall(cmd, mentioned, cwd, consent) {
   const runner = verbName(tokens[0]);
   if (resolvesToScript(tokens[at], new Set(['config.mjs']), cwd)) {
     return runner === 'node' && at === 1 && isConfigSet(tokens.slice(2), consent);
+  }
+  if (resolvesToScript(tokens[at], new Set(['key-form.mjs']), cwd)) {
+    return runner === 'node' && at === 1 && isKeyFormArgs(tokens.slice(2));
   }
   if (!resolvesToScript(tokens[at], DIAGNOSE_SCRIPTS, cwd)) return false;
   const args = tokens.slice(at + 1);
