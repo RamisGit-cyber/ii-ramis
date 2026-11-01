@@ -1080,116 +1080,99 @@ CLAUDE_CONFIG_DIR="$D" IIRAMIS_HOME="$D/h" python3 "$ROOT/tests/pty-run.py" --ag
 expect "-|-|-|-" "setup-settings в псевдотерминале с CLAUDECODE + «да»: bypass не включён" "$(settings_probe "$D")"
 rm -rf "$D"
 
-echo "== v1.0.3: согласие в чате фиксирует хук UserPromptSubmit, а не Claude =="
+echo "== v1.0.3: согласие в чате: хук UserPromptSubmit и одноразовый код «да <код>» =="
 CONSENT_HOME="$(mktemp -d)"
-QUESTION="$(node --input-type=module -e "import { CONSENT_QUESTION } from '$S/consent-rules.mjs'; process.stdout.write(CONSENT_QUESTION)")"
-grep -qF "$QUESTION" "$ROOT/plugins/ii-ramis/skills/ii-ramis/SKILL.md" && R=yes || R=no
-expect yes "вопрос о согласии в навыке ii-ramis слово в слово совпадает с константой в коде" "$R"
-echo '{"cwd":"/tmp"}' | IIRAMIS_HOME="$CONSENT_HOME/h0" node "$S/session-start.mjs" | grep -qF "$QUESTION" && R=yes || R=no
-expect yes "хук запуска велит задать именно этот вопрос слово в слово" "$R"
 node -e 'const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(JSON.stringify(h.hooks.UserPromptSubmit[0].hooks[0].command))' "$ROOT/plugins/ii-ramis/hooks/hooks.json" | grep -q "consent-hook.mjs" && R=yes || R=no
 expect yes "hooks.json: UserPromptSubmit запускает consent-hook.mjs" "$R"
 
-# Claude (охранник): share=true закрыт совсем, share=false открыт
 guard_code() { # guard_code <команда> -> код охранника
   node -e 'process.stdout.write(JSON.stringify({tool_name:"Bash",cwd:process.argv[2],tool_input:{command:process.argv[1]}}))' "$1" "$WORK" | node "$S/guard.mjs" >/dev/null 2>&1
   echo $?
 }
-for cmd in "node \"$S/config.mjs\" set share true" "node \"$S/config.mjs\" set share yes" "node \"$S/config.mjs\" set share 1" "cd $S && node config.mjs set share true" "node '$S/config.mjs' set share TRUE" "ls && node \"$S/config.mjs\" set share true"; do
-  expect 2 "Claude: «$cmd» закрыто" "$(guard_code "$cmd")"
+for cmd in "node \"$S/config.mjs\" set share true" "node \"$S/config.mjs\" set share yes" "node \"$S/config.mjs\" set share 1" "cd $S && node config.mjs set share true" "node '$S/config.mjs' set share TRUE" "ls && node \"$S/config.mjs\" set share true" "node \"$S/config.mjs\" set consent_code 1234" "node \"$S/config.mjs\" set consent_asked true"; do
+  expect 2 "Claude: «${cmd: -50}» закрыто" "$(guard_code "$cmd")"
 done
 expect 2 "Claude: Write в config.json закрыт" "$(guard Write file_path "$HOME/.ii-ramis/config.json" "$WORK/proj")"
 expect 2 "Claude: Edit в config.json через IIRAMIS_HOME закрыт" "$(guard Edit file_path "$IIRAMIS_HOME/config.json" "$WORK/proj")"
 expect 0 "Claude: set share false разрешён" "$(guard_code "node \"$S/config.mjs\" set share false")"
-expect 0 "Claude: set consent_asked true разрешён (флаг «вопрос задан»)" "$(guard_code "node \"$S/config.mjs\" set consent_asked true")"
-expect 2 "Claude: set consent_asked false закрыто (гасит только хук)" "$(guard_code "node \"$S/config.mjs\" set consent_asked false")"
 expect 0 "Claude: set share_asked true разрешён" "$(guard_code "node \"$S/config.mjs\" set share_asked true")"
 
-# Истории сессий Claude: править нельзя, читать можно, память рядом доступна
-expect 2 "Write в ~/.claude/projects/**/сессия.jsonl закрыт" "$(guard Write file_path "$HOME/.claude/projects/-tmp-proj/abc.jsonl" "$WORK/proj")"
-expect 2 "Edit истории сессии закрыт" "$(guard Edit file_path "$HOME/.claude/projects/-tmp-proj/abc.jsonl" "$WORK/proj")"
-expect 2 "Bash: запись в историю сессии закрыта" "$(guard_code "echo x >> ~/.claude/projects/-tmp-proj/abc.jsonl")"
-expect 2 "Bash: sed -i по истории сессии закрыт" "$(guard_code "sed -i s/a/b/ ~/.claude/projects/-tmp-proj/abc.jsonl")"
-expect 0 "Bash: чтение истории сессии (grep) разрешено" "$(guard_code "grep error ~/.claude/projects/-tmp-proj/abc.jsonl")"
-expect 0 "Write в память ~/.claude/projects/**/memory/*.md по-прежнему разрешён" "$(guard Write file_path "$HOME/.claude/projects/-tmp-proj/memory/note.md" "$WORK/proj")"
-
-# Хук: настоящий ответ ученика
-write_transcript() { # write_transcript <файл> <режим> [текст ассистента]  режимы: ask, ask2 (два текстовых блока), none, tail (вопрос + запись с ответом ученика)
-  node -e '
-const [file,mode,text,answer]=process.argv.slice(1);
-const A=(content)=>({type:"assistant",message:{role:"assistant",content}});
-const U=(content)=>({type:"user",message:{role:"user",content}});
-const rows=[U("привет"),A([{type:"text",text:"Привет! Какой урок ты прошёл?"}]),U("урок 3")];
-if(mode==="ask"||mode==="tail"){rows.push(A([{type:"tool_use",id:"t1",name:"Bash",input:{command:"node config.mjs set consent_asked true"}}]));rows.push(U([{type:"tool_result",tool_use_id:"t1",content:"ok"}]));rows.push(A([{type:"text",text}]));}
-if(mode==="ask2"){rows.push(A([{type:"text",text:"Сейчас спрошу."},{type:"text",text}]));}
-if(mode==="tail")rows.push(U(answer));
-require("fs").writeFileSync(file,rows.map((r)=>JSON.stringify(r)).join("\n")+"\n");' "$@"
-}
-hook_run() { # hook_run <home> <prompt> <transcript или пусто>
-  node -e 'const [p,t]=process.argv.slice(1);const i={hook_event_name:"UserPromptSubmit",prompt:p,session_id:"s"};if(t)i.transcript_path=t;process.stdout.write(JSON.stringify(i))' "$2" "$3" | IIRAMIS_HOME="$1" node "$S/consent-hook.mjs" >/dev/null 2>&1
+hook_run() { # hook_run <home> <prompt> -> stdout хука
+  node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:process.argv[1],session_id:"s"}))' "$2" | IIRAMIS_HOME="$1" node "$S/consent-hook.mjs" 2>/dev/null
 }
 cfg() { # cfg <home> <ключ> -> значение или none
   node -e 'try{const c=JSON.parse(require("fs").readFileSync(process.argv[1]+"/config.json","utf8"));const v=c[process.argv[2]];process.stdout.write(v===undefined?"none":String(v))}catch(e){process.stdout.write("none")}' "$1" "$2"
 }
-new_home() { # new_home <имя> [флаг consent_asked]
+new_home() { # new_home <имя> [код] [возраст кода в минутах] [share_asked]
   H="$CONSENT_HOME/$1"; mkdir -p "$H"
-  printf '{"student_id":"s","install_id":"test-plugin-0001","share":false,"consent_asked":%s}' "${2:-true}" > "$H/config.json"
+  node -e '
+const [file,code,age,asked]=process.argv.slice(1);
+const c={student_id:"s",install_id:"test-plugin-0001",share:false};
+if(code){c.consent_code=code;c.consent_code_ts=Date.now()-Number(age||0)*60000;c.consent_wrong=0;}
+if(asked==="true")c.share_asked=true;
+require("fs").writeFileSync(file+"/config.json",JSON.stringify(c));' "$H" "${2:-}" "${3:-0}" "${4:-}"
 }
-T="$CONSENT_HOME/t.jsonl"
-for answer in "да" "Да!" "yes" "ок" "Согласен"; do
-  new_home y1; write_transcript "$T" ask "$QUESTION"
-  hook_run "$H" "$answer" "$T"
-  expect "true|true|false" "хук: вопрос задан, ответ «$answer»: share=true, share_asked=true, флаг погашен" "$(cfg "$H" share)|$(cfg "$H" share_asked)|$(cfg "$H" consent_asked)"
+
+# 1. хук выдаёт код и точный вопрос
+new_home a1
+OUT="$(hook_run "$H" "привет, я начинаю")"
+CODE="$(cfg "$H" consent_code)"
+echo "$CODE" | grep -qE '^[0-9]{4}$' && R=yes || R=no
+expect yes "хук: на первое сообщение выдан четырёхзначный код" "$R"
+echo "$OUT" | grep -qF "да $CODE" && echo "$OUT" | grep -qF "Можно отправлять Рамису короткий пересказ твоих занятий" && R=yes || R=no
+expect yes "хук: additionalContext велит задать вопрос слово в слово, с кодом" "$R"
+expect false "хук: сам по себе код отправку не включает" "$(cfg "$H" share)"
+# 2. верный ответ
+hook_run "$H" "да $CODE" >/dev/null
+expect "true|true|none" "хук: «да $CODE» включает отправку, код стёрт" "$(cfg "$H" share)|$(cfg "$H" share_asked)|$(cfg "$H" consent_code)"
+OUT="$(hook_run "$H" "да $CODE")"
+expect "" "хук: после согласия больше ничего не выдаётся" "$OUT"
+for answer in "да 4821" "Да 4821" "да  4821!" "ДА 4821."; do
+  new_home y "4821" 1
+  hook_run "$H" "$answer" >/dev/null
+  expect "true|none" "хук: ответ «$answer» (код 4821) засчитан" "$(cfg "$H" share)|$(cfg "$H" consent_code)"
 done
-new_home y2; write_transcript "$T" tail "$QUESTION" "да"
-hook_run "$H" "да" "$T"
-expect true "хук: запись с ответом ученика уже лежит в истории: согласие засчитано" "$(cfg "$H" share)"
-new_home y3
-hook_run "$H" "да" "$CONSENT_HOME/нет-такого.jsonl"
-expect "true|false" "хук: историю не прочитать, но флаг есть: согласие по флагу, флаг погашен" "$(cfg "$H" share)|$(cfg "$H" consent_asked)"
-new_home y4; write_transcript "$T" ask "$QUESTION"
-hook_run "$H" "нет" "$T"
-expect "false|true|false" "хук: ответ «нет»: share=false, share_asked=true" "$(cfg "$H" share)|$(cfg "$H" share_asked)|$(cfg "$H" consent_asked)"
-for answer in "да, но не отправляй" "да, отправляй" "Да, можно" "не знаю" "потом" "да, только сначала расскажи, что именно уходит, и не включай, пока я не пойму" "да да да да да да да да да да да да да да" "давай"; do
-  new_home n1; write_transcript "$T" ask "$QUESTION"
-  hook_run "$H" "$answer" "$T"
-  expect "false|false" "хук: ответ «${answer:0:40}» не согласие: share выключен, флаг погашен" "$(cfg "$H" share)|$(cfg "$H" consent_asked)"
+# 3. всё остальное не согласие
+for answer in "да" "да, отправляй" "да 4822" "да 4821 и ещё что-то" "yes 4821" "ок 4821" "4821" "да 4821 4821" "согласен" "да,4821" "нет 4821"; do
+  new_home n "4821" 1
+  hook_run "$H" "$answer" >/dev/null
+  expect false "хук: «$answer» не согласие (код 4821)" "$(cfg "$H" share)"
 done
-new_home n2 false; write_transcript "$T" ask "$QUESTION"
-hook_run "$H" "да" "$T"
-expect "false|false" "хук: флага «вопрос задан» нет: «да» ничего не включает" "$(cfg "$H" share)|$(cfg "$H" consent_asked)"
-new_home n3; write_transcript "$T" ask "Привет! $QUESTION"
-hook_run "$H" "да" "$T"
-expect "false|false" "хук: вопрос с приставкой, не точное совпадение: не засчитано" "$(cfg "$H" share)|$(cfg "$H" consent_asked)"
-new_home n4; write_transcript "$T" ask2 "$QUESTION"
-hook_run "$H" "да" "$T"
-expect "false|false" "хук: в ходе два текстовых блока, вопрос не единственный: не засчитано" "$(cfg "$H" share)|$(cfg "$H" consent_asked)"
-new_home n5; write_transcript "$T" ask "Сделал сайт. Что дальше?"
-hook_run "$H" "да" "$T"
-expect "false|false" "хук: последний ход ассистента не вопрос о согласии: «да» относится к другому" "$(cfg "$H" share)|$(cfg "$H" consent_asked)"
-new_home n6; write_transcript "$T" ask "${QUESTION:0:30}"
-hook_run "$H" "да" "$T"
-expect "false|false" "хук: обрывок вопроса не засчитывается" "$(cfg "$H" share)|$(cfg "$H" consent_asked)"
-new_home n7; : > "$CONSENT_HOME/empty.jsonl"
-hook_run "$H" "да" "$CONSENT_HOME/empty.jsonl"
-expect "false|false" "хук: пустая история: вопрос не подтверждён, не засчитано" "$(cfg "$H" share)|$(cfg "$H" consent_asked)"
-new_home n8; write_transcript "$T" ask "$QUESTION"
-hook_run "$H" "" "$T"
-expect "false|true" "хук: пустой prompt ничего не меняет (флаг остаётся)" "$(cfg "$H" share)|$(cfg "$H" consent_asked)"
-new_home o1; write_transcript "$T" ask "$QUESTION"
-hook_run "$H" "что именно уходит?" "$T"; hook_run "$H" "да" "$T"
-expect "false|false" "хук: между вопросом и «да» было другое сообщение: флаг погашен первым, «да» не засчитано" "$(cfg "$H" share)|$(cfg "$H" consent_asked)"
-new_home s1; write_transcript "$T" ask "$QUESTION"
-node -e 'const f=process.argv[1];const L=require("fs").readFileSync(f,"utf8").trim().split("\n").map(JSON.parse);L[L.length-1].isSidechain=true;require("fs").writeFileSync(f,L.map(JSON.stringify).join("\n")+"\n")' "$T"
-hook_run "$H" "да" "$T"
-expect "false|false" "хук: вопрос из побочной ветки (подагент) не считается вопросом ассистента" "$(cfg "$H" share)|$(cfg "$H" consent_asked)"
-new_home o2; printf 'не json' | IIRAMIS_HOME="$H" node "$S/consent-hook.mjs" >/dev/null 2>&1; expect 0 "хук: мусор на входе не роняет сессию" "$?"
-# имя: только при включённом share
-write_transcript "$CONSENT_HOME/dummy.jsonl" ask "$QUESTION"
+new_home t1 "4821" 1
+hook_run "$H" "да" >/dev/null; hook_run "$H" "да" >/dev/null
+expect "2|4821" "хук: «да» без кода считается попыткой, код пока жив" "$(cfg "$H" consent_wrong)|$(cfg "$H" consent_code)"
+hook_run "$H" "да" >/dev/null
+expect "none|false" "хук: после трёх «да» без кода код сгорает, отправка выключена" "$(cfg "$H" consent_code)|$(cfg "$H" share)"
+new_home no1 "4821" 1
+hook_run "$H" "нет" >/dev/null
+expect "false|true|none" "хук: «нет» выключает отправку и закрывает вопрос" "$(cfg "$H" share)|$(cfg "$H" share_asked)|$(cfg "$H" consent_code)"
+# 4. срок жизни кода
+new_home e1 "4821" 61
+OUT="$(hook_run "$H" "да 4821")"
+expect false "хук: код старше часа не принимается" "$(cfg "$H" share)"
+NEWCODE="$(cfg "$H" consent_code)"
+echo "$NEWCODE" | grep -qE '^[0-9]{4}$' && echo "$OUT" | grep -qF "да $NEWCODE" && R=yes || R=no
+expect yes "хук: взамен протухшего кода выдан новый" "$R"
+# 5. посторонние сообщения
+new_home p1 "" 0 true
+OUT="$(hook_run "$H" "собери лендинг")"
+expect "" "хук: решение уже принято — тишина" "$OUT$(cfg "$H" consent_code | grep -v none)"
+new_home p2
+OUT="$(hook_run "$H" "/ii-ramis:proverka")"
+expect "none" "хук: слэш-команда не запускает вопрос о согласии" "$(cfg "$H" consent_code)"
+OUT="$(hook_run "$H" "")"
+expect "none" "хук: пустое сообщение ничего не делает" "$(cfg "$H" consent_code)"
+new_home p3; printf 'не json' | IIRAMIS_HOME="$H" node "$S/consent-hook.mjs" >/dev/null 2>&1; expect 0 "хук: мусор на входе не роняет сессию" "$?"
+new_home p4 "4821" 1
+OUT="$(hook_run "$H" "что именно уходит?")"
+echo "$OUT" | grep -qF "да 4821" && R=yes || R=no
+expect yes "хук: пока вопрос без ответа, напоминает его текст; код жив" "$R"
+expect "4821" "хук: посторонний вопрос код не сжигает" "$(cfg "$H" consent_code)"
+# 6. имя: только при включённой отправке
 rm -f "$IIRAMIS_HOME/config.json"
-expect 2 "Claude: student_name при выключенном share нельзя" "$(guard_code "node \"$S/config.mjs\" set student_name Айбек")"
+expect 2 "Claude: student_name при выключенной отправке нельзя" "$(guard_code "node \"$S/config.mjs\" set student_name Айбек")"
 printf '{"share":true,"install_id":"test-plugin-0001","student_id":"s"}' > "$IIRAMIS_HOME/config.json"
-expect 0 "Claude: student_name при включённом share можно" "$(guard_code "node \"$S/config.mjs\" set student_name Айбек")"
+expect 0 "Claude: student_name при включённой отправке можно" "$(guard_code "node \"$S/config.mjs\" set student_name Айбек")"
 expect 2 "Claude: student_name похож на ключ — нельзя" "$(guard_code "node \"$S/config.mjs\" set student_name sk-abcdefghijklmnopqrstuvwxyz")"
 expect 2 "Claude: student_name с мусором нельзя" "$(guard_code "node \"$S/config.mjs\" set student_name 'a;ls'")"
 rm -f "$IIRAMIS_HOME/config.json"
@@ -1197,6 +1180,10 @@ run_bash_list 2 \
   "node \"$S/config.mjs\" set share_asked false" \
   "node \"$S/config.mjs\" set share maybe" \
   "node \"$S/config.mjs\" set install_id x"
+echo '{"cwd":"/tmp"}' | IIRAMIS_HOME="$CONSENT_HOME/h0" node "$S/session-start.mjs" | grep -q "защитный хук" && R=yes || R=no
+expect yes "хук запуска объясняет наставнику, что вопрос с кодом выдаст защитный хук" "$R"
+grep -q "consent_asked" "$S"/*.mjs "$ROOT/plugins/ii-ramis/skills/ii-ramis/SKILL.md" && R=found || R=none
+expect none "флаг consent_asked и доверие истории сессии удалены из кода и навыка" "$R"
 rm -rf "$CONSENT_HOME"
 
 echo "== v1.0.3: recap.txt доступен для записи, остальное в ~/.ii-ramis защищено =="

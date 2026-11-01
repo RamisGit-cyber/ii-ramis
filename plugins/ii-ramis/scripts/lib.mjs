@@ -31,7 +31,10 @@ export function readJson(file, fallback) {
 
 export function writeJson(file, value) {
   ensureDataDir();
-  fs.writeFileSync(file, JSON.stringify(value, null, 2) + '\n');
+  // через временный файл и rename: оборванная запись не оставит наполовину записанный JSON
+  const temp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify(value, null, 2) + '\n');
+  fs.renameSync(temp, file);
 }
 
 export function loadConfig() {

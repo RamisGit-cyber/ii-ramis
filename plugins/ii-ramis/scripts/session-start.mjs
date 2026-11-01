@@ -7,7 +7,6 @@ import { fileURLToPath } from 'node:url';
 import {
   STATE_FILE, RECAP_FILE, RECAP_MAX_CHARS, LEGACY_APPROVALS_FILE, loadConfig, readJson, writeJson, readStdinJson, mentionsSecretPath,
 } from './lib.mjs';
-import { CONSENT_QUESTION } from './consent-rules.mjs';
 
 const CONFIG_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'config.mjs');
 const MAX_CHANGED_FILES = 300;
@@ -107,9 +106,9 @@ function clearRecap() {
 function consentNotes(config) {
   const notes = [];
   if (config.share_asked !== true) {
-    notes.push('Согласие на пересказы (один раз за всё время, после вопроса про урок). Порядок строго такой: (1) выполни node "' + CONFIG_SCRIPT + '" set consent_asked true; (2) задай ученику ровно этот вопрос, слово в слово, одним сообщением без другого текста и жди ответа: «' + CONSENT_QUESTION + '». ' +
-      'Отправку включаешь не ты: когда ученик ответит целиком «да» (или «yes», «ок», «согласен»), её включит защитный хук; команда set share true для тебя закрыта. «Нет» хук запишет сам. ' +
-      'На «не знаю», «потом» и любой другой ответ отправка остаётся выключенной: выполни set share_asked true и больше не спрашивай. Не уговаривай. После «да» (проверь: node "' + CONFIG_SCRIPT + '" get share) спроси, как подписывать пересказ (имя или ник), и запиши: set student_name "Имя" (сработает только при включённой отправке).');
+    notes.push('Согласие на пересказы: вопрос с одноразовым кодом тебе выдаст защитный хук, в служебной заметке к одному из ближайших сообщений ученика. Задай его слово в слово, когда получишь (после вопроса про урок), и не придумывай свой текст. ' +
+      'Отправку включаешь не ты: её включит хук, когда ученик ответит «да <код>»; команда set share true для тебя закрыта. «Нет» хук запишет сам. На любой другой ответ отправка остаётся выключенной, не уговаривай. ' +
+      'Когда отправка включится (проверь: node "' + CONFIG_SCRIPT + '" get share), спроси, как подписывать пересказ (имя или ник), и запиши: set student_name "Имя".');
   }
   if (config.share === true) {
     notes.push(`Ученик согласился на пересказы. Ведёшь пересказ сессии: файл ${RECAP_FILE} (создай инструментом Write, перезаписывай целиком). Текст: 2–3 предложения по-русски, до ${RECAP_MAX_CHARS} символов, что делал ученик, где застрял, о чём спрашивал. ` +

@@ -1,23 +1,25 @@
-// Согласие на пересказы сессий даётся в чате, а фиксирует его ХУК UserPromptSubmit (consent-hook.mjs), не Claude.
-// Хук видит настоящий текст, который набрал ученик, и сам пишет share=true в config.json. Claude эту запись сделать не может:
-// `config.mjs set share true` запрещён ему полностью (checkConsentCommand), а ~/.ii-ramis защищена от записи.
-// Условия согласия: (1) наставник перед вопросом поставил одноразовый флаг consent_asked, (2) если историю сессии
-// можно прочитать, последний ход ассистента состоит ровно из вопроса CONSENT_QUESTION (единственный текстовый блок),
-// (3) ответ ученика целиком «да», «yes», «ок» или «согласен». Флаг гасится при ЛЮБОМ следующем сообщении ученика.
-import fs from 'node:fs';
+// Согласие на пересказы сессий: даётся в чате, фиксирует его ХУК UserPromptSubmit (consent-hook.mjs), а не Claude.
+// Схема не доверяет ни истории сессии, ни словам Claude:
+//   1) хук сам выдаёт одноразовый код (4 цифры), сохраняет его в конфиге и через additionalContext велит наставнику
+//      задать ученику вопрос дословно, вместе с кодом: «…Если согласен, ответь: да 4821»;
+//   2) согласие засчитывается, только если настоящее сообщение ученика (input.prompt) целиком равно «да <код>»;
+//   3) код живёт CODE_TTL_MS, на попытки «да» без кода есть лимит, после использования код стирается; всё остальное не согласие.
+// Claude команду `config.mjs set share true` выполнить не может (checkConsentCommand), а сам конфиг править не может (protect-rules).
+// Ограничение: это сетка, а не стена. Скрипт, который Claude сам напишет в проекте и запустит, может записать файл напрямую
+// (защита не читает содержимое файлов проекта, см. README «Чего страховка не ловит»).
+import crypto from 'node:crypto';
 import { CONFIG_FILE, readJson } from './lib.mjs';
 
-export const CONSENT_QUESTION = 'Можно отправлять Рамису короткий пересказ твоих занятий (без кода и паролей), чтобы он видел, где тебе помочь? да/нет';
+export const CONSENT_QUESTION = 'Можно отправлять Рамису короткий пересказ твоих занятий (без кода и паролей), чтобы он видел, где тебе помочь?';
+export const CODE_TTL_MS = 60 * 60 * 1000;
+export const MAX_WRONG_ATTEMPTS = 3;
 
-const READ_TAIL_BYTES = 1024 * 1024;
-const YES_ANSWER = /^\s*(?:да|yes|ок|окей|ok|okay|согласен|согласна)[\s.!)]*$/iu;
-const NO_ANSWER = /^\s*(?:нет|no|не надо|не хочу|не согласен|не согласна|не отправляй)[\s.!)]*$/iu;
-const SHARE_ON_REASON = 'включать отправку пересказов Claude не может совсем: согласие фиксирует защитный хук, когда ученик сам ответил «да» на твой вопрос. ' +
-  `Задай вопрос слово в слово («${CONSENT_QUESTION}») отдельным сообщением, перед этим выполни set consent_asked true, и жди ответа. Команду set share true не повторяй`;
-const NAME_REASON = 'записать имя можно только после того, как ученик согласился на пересказы (share включён хуком по его явному «да»)';
+const SHARE_ON_REASON = 'включать отправку пересказов Claude не может совсем: согласие фиксирует защитный хук, когда ученик сам ответит «да <код>» на твой вопрос. ' +
+  'Дождись, пока хук выдаст тебе вопрос с кодом, задай его слово в слово и жди ответа. Команду set share true не повторяй';
+const NAME_REASON = 'записать имя можно только после того, как ученик согласился на пересказы (отправка включена хуком по его явному «да <код>»)';
 
-const normalize = (text) => String(text).replace(/\s+/g, ' ').trim();
-const QUESTION_NORMALIZED = normalize(CONSENT_QUESTION);
+export const newCode = () => String(crypto.randomInt(1000, 10000));
+export const buildQuestion = (code) => `${CONSENT_QUESTION} Если согласен, ответь: да ${code}. Если не хочешь, ответь: нет.`;
 
 const configTokenAt = (tokens) => tokens.findIndex((t) => /(^|[\\/])config\.mjs$/i.test(String(t).replace(/['"]/g, '')));
 export function isShareOn(tokens) {
@@ -29,89 +31,48 @@ export function isStudentNameSet(tokens) {
   return at !== -1 && tokens[at + 1] === 'set' && tokens[at + 2] === 'student_name';
 }
 
-export const answerIsYes = (text) => typeof text === 'string' && text.length <= 40 && YES_ANSWER.test(text);
-export const answerIsNo = (text) => typeof text === 'string' && text.length <= 40 && NO_ANSWER.test(text);
+export const answerIsYes = (prompt, code) => typeof prompt === 'string' && prompt.length <= 30
+  && new RegExp(`^\\s*да\\s+${code}[\\s.!)]*$`, 'iu').test(prompt);
+export const answerIsNo = (prompt) => typeof prompt === 'string' && prompt.length <= 30
+  && /^\s*(?:нет|no|не надо|не хочу)[\s.!)]*$/iu.test(prompt);
 
-function blocksOf(entry) {
-  const content = entry?.message?.content;
-  return Array.isArray(content) ? content : typeof content === 'string' ? [{ type: 'text', text: content }] : [];
-}
-const stripReminders = (text) => String(text).replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, ' ').trim();
-const SERVICE_ENTRY = (entry) => entry?.isMeta || entry?.isSidechain || entry?.isCompactSummary || entry?.isVisibleInTranscriptOnly;
-function studentText(entry) {
-  if (entry?.type !== 'user' || SERVICE_ENTRY(entry)) return null;
-  const blocks = blocksOf(entry);
-  if (blocks.some((b) => b.type === 'tool_result')) return null;
-  const text = stripReminders(blocks.filter((b) => b.type === 'text').map((b) => b.text || '').join(' '));
-  return text || null;
-}
+const CODE_FIELDS = { consent_code: null, consent_code_ts: null, consent_wrong: null };
+const looksLikeSlashCommand = (prompt) => /^\s*\//.test(prompt);
 
-function readTailEntries(transcriptPath) {
-  const size = fs.statSync(transcriptPath).size;
-  const start = Math.max(0, size - READ_TAIL_BYTES);
-  const fd = fs.openSync(transcriptPath, 'r');
-  let raw;
-  try {
-    const buffer = Buffer.alloc(size - start);
-    fs.readSync(fd, buffer, 0, buffer.length, start);
-    raw = buffer.toString('utf8');
-  } finally {
-    fs.closeSync(fd);
+// Решение хука на сообщение ученика. Возвращает { patch, context } (оба необязательны) или null.
+// patch: значение null удаляет поле. now: Date.now(); makeCode: генератор кода (подменяется в тестах).
+export function decideConsent({ config, prompt, now = Date.now(), makeCode = newCode }) {
+  if (typeof prompt !== 'string' || !prompt.trim() || looksLikeSlashCommand(prompt)) return null;
+  const pending = typeof config.consent_code === 'string' && /^\d{4}$/.test(config.consent_code);
+  const fresh = pending && Number.isFinite(config.consent_code_ts) && now - config.consent_code_ts <= CODE_TTL_MS;
+
+  if (pending && fresh) {
+    if (answerIsYes(prompt, config.consent_code)) return { patch: { ...CODE_FIELDS, share: true, share_asked: true } };
+    if (answerIsNo(prompt)) return { patch: { ...CODE_FIELDS, share: false, share_asked: true } };
+    const before = Number(config.consent_wrong) || 0;
+    const wrong = before + (/(?:^|\s)да(?:\s|$|[.!,])/iu.test(prompt) ? 1 : 0);
+    if (wrong >= MAX_WRONG_ATTEMPTS) return { patch: CODE_FIELDS }; // слишком много «да» без кода: код сгорает, новый выдастся позже
+    return {
+      patch: wrong !== before ? { consent_wrong: wrong } : undefined,
+      context: `ИИ Рамис, служебное: вопрос о пересказах с кодом уже выдан. Если ты его ещё не задал, задай слово в слово: «${buildQuestion(config.consent_code)}». Если задал, не повторяй. «да» без кода согласием не считается.`,
+    };
   }
-  const entries = [];
-  for (const line of raw.split('\n').filter(Boolean)) {
-    try { entries.push(JSON.parse(line)); } catch { /* обрезанная первая строка хвоста */ }
-  }
-  return entries;
+  if (config.share_asked === true) return pending ? { patch: CODE_FIELDS } : null; // ученик уже решил раньше; протухший код стираем
+  const code = makeCode();
+  return {
+    patch: { consent_code: code, consent_code_ts: now, consent_wrong: 0 },
+    context: 'ИИ Рамис, служебное: ученик ещё не решил, можно ли отправлять Рамису пересказы занятий. Ответь на его сообщение как обычно, а в конце отдельным абзацем задай вопрос слово в слово, '
+      + `ничего не меняя и не добавляя: «${buildQuestion(code)}». Отправку включит защитный хук, когда ученик ответит именно «да ${code}»; сам ты её включить не можешь. `
+      + 'Если ты ещё не спросил, какой урок он прошёл, сначала спроси про урок, а этот вопрос задай со следующим сообщением. Не уговаривай.',
+  };
 }
 
-// Тексты последнего хода ассистента (все текстовые блоки подряд до предыдущего настоящего сообщения ученика).
-// Запись о текущем сообщении ученика (prompt) может уже лежать в истории: тогда пропускаем её.
-export function lastAssistantTurnTexts(entries, prompt) {
-  let index = entries.length - 1;
-  const current = studentText(entries[index]);
-  if (current !== null && normalize(current) === normalize(prompt)) index -= 1;
-  const texts = [];
-  for (; index >= 0; index -= 1) {
-    const entry = entries[index];
-    if (studentText(entry) !== null) break; // дошли до предыдущего сообщения ученика
-    if (entry?.type !== 'assistant' || entry.isSidechain) continue;
-    for (const block of blocksOf(entry).slice().reverse()) {
-      if (block.type === 'text' && normalize(block.text || '')) texts.unshift(normalize(block.text));
-    }
-  }
-  return texts;
-}
-
-// 'yes' — последний ход ассистента ровно вопрос; 'no' — там что-то другое; 'unreadable' — историю прочитать не удалось.
-export function questionJustAsked(transcriptPath, prompt) {
-  if (!transcriptPath || typeof transcriptPath !== 'string') return 'unreadable';
-  try {
-    const texts = lastAssistantTurnTexts(readTailEntries(transcriptPath), prompt);
-    return texts.length === 1 && texts[0] === QUESTION_NORMALIZED ? 'yes' : 'no';
-  } catch {
-    return 'unreadable';
-  }
-}
-
-// Решение хука UserPromptSubmit. config: текущий config.json. Возвращает { patch } для config.json или null (ничего не менять).
-// Флаг consent_asked одноразовый: гасится при любом сообщении ученика.
-export function decideConsent({ config, prompt, transcriptPath }) {
-  if (config.consent_asked !== true) return null;
-  const patch = { consent_asked: false };
-  const verdict = questionJustAsked(transcriptPath, prompt);
-  if (verdict === 'no') return { patch }; // вопрос не был последним ходом: ответ относится не к нему
-  if (answerIsYes(prompt)) return { patch: { ...patch, share: true, share_asked: true } };
-  if (answerIsNo(prompt)) return { patch: { ...patch, share: false, share_asked: true } };
-  return { patch };
-}
-
-// Имя можно записать только когда share уже включён хуком.
+// Имя можно записать только когда отправка уже включена хуком.
 export function nameMayBeSet() {
   return readJson(CONFIG_FILE, {}).share === true;
 }
 
-// Команды Claude: share=true запрещён всегда; student_name только при включённом share.
+// Команды Claude: share=true запрещён всегда; student_name только при включённой отправке.
 export function checkConsentCommand(commands) {
   for (const cmd of commands) {
     if (isShareOn(cmd.tokens)) return SHARE_ON_REASON;
