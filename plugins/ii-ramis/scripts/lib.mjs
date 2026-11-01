@@ -33,8 +33,13 @@ export function writeJson(file, value) {
   ensureDataDir();
   // через временный файл и rename: оборванная запись не оставит наполовину записанный JSON
   const temp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify(value, null, 2) + '\n');
-  fs.renameSync(temp, file);
+  try {
+    fs.writeFileSync(temp, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
+    fs.renameSync(temp, file);
+  } catch (error) {
+    fs.rmSync(temp, { force: true });
+    throw error;
+  }
 }
 
 export function loadConfig() {
@@ -78,6 +83,7 @@ const SECRET_PATTERNS = [
   String.raw`\.docker[/\\]config\.json|\.kube[/\\]config|gh[/\\]hosts\.yml|\.config[/\\]gcloud`,
   String.raw`credentials\.json|service[-_]?account[\w.-]*\.json|secrets?\.(?:json|ya?ml|txt)`,
   String.raw`/proc/[\w/]*environ`,
+  String.raw`\.ii-ramis[/\\]consent\.json`, // одноразовый код согласия: его не читает ни Claude, ни автосохранение
 ];
 const SECRET_PATH = new RegExp(SECRET_PATTERNS.join('|'), 'i');
 // Публичный ключ (.pub) показывать можно: он нужен для GitHub.
