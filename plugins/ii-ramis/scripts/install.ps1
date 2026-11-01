@@ -1,6 +1,6 @@
 # Installer of the 'II Ramis' package for Windows (PowerShell). Idempotent: safe to run again.
-# Run:  irm https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/v1.0.3/plugins/ii-ramis/scripts/install.ps1 | iex
-# The installer itself is fetched from an immutable tag (v1.0.3); the plugin follows the stable branch with auto-update on.
+# Run:  irm https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/v1.0.4/plugins/ii-ramis/scripts/install.ps1 | iex
+# The installer itself is fetched from an immutable tag (v1.0.4); the plugin follows the stable branch with auto-update on.
 # This file is ASCII ONLY (Russian strings are built from ~uXXXX codes by function T), so it reads the same via irm | iex
 # and via powershell -File in Windows PowerShell 5.1 without a BOM. The installer never enables bypass mode,
 # and the installer does not ask the session-recap sharing consent: ii-ramis asks it once in the chat on the first greeting.
@@ -18,7 +18,7 @@ function T([string]$Text) {
 }
 if ($env:IIRAMIS_DRYRUN -eq '1') { $DryRun = $true }
 
-$ReleaseTag = 'v1.0.3'
+$ReleaseTag = 'v1.0.4'
 $ChannelRef = 'stable'
 $RawBase = if ($env:IIRAMIS_RAW_BASE) { $env:IIRAMIS_RAW_BASE } else { "https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/$ReleaseTag/plugins/ii-ramis/scripts" }
 $MarketplaceSource = if ($env:IIRAMIS_MARKETPLACE_SOURCE) { $env:IIRAMIS_MARKETPLACE_SOURCE } else { "RamisGit-cyber/ii-ramis#$ChannelRef" }

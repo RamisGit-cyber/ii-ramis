@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Установщик пакета «ИИ Рамис» для macOS (и Linux). Идемпотентный: повторный запуск безопасен.
-# Запуск:  curl -fsSL https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/v1.0.3/plugins/ii-ramis/scripts/install.sh | bash
-# Сам установщик качается с неизменяемого тега (v1.0.3): фраза ученика не меняется от каждого пуша.
+# Запуск:  curl -fsSL https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/v1.0.4/plugins/ii-ramis/scripts/install.sh | bash
+# Сам установщик качается с неизменяемого тега (v1.0.4): фраза ученика не меняется от каждого пуша.
 # Плагин следит за веткой stable (туда владелец кладёт только проверенные релизы), автообновление этого маркетплейса включено.
 # Повторный запуск переводит ученика со старой версии (маркетплейс на теге) на stable.
 # Флаги:   --dry-run  показать, что будет сделано, ничего не меняя
@@ -10,7 +10,7 @@
 # Согласие на пересказы занятий установщик не спрашивает: его один раз спрашивает ИИ Рамис в чате при первом знакомстве.
 set -u
 
-RELEASE_TAG="v1.0.3"
+RELEASE_TAG="v1.0.4"
 CHANNEL_REF="stable"
 RAW_BASE="${IIRAMIS_RAW_BASE:-https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/$RELEASE_TAG/plugins/ii-ramis/scripts}"
 MARKETPLACE_SOURCE="${IIRAMIS_MARKETPLACE_SOURCE:-RamisGit-cyber/ii-ramis#$CHANNEL_REF}"
