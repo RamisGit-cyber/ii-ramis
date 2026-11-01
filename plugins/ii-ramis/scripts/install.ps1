@@ -1,49 +1,31 @@
-# Установщик пакета «ИИ Рамис» для Windows (PowerShell). Идемпотентный: повторный запуск безопасен.
-# Запуск:  irm https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/v1.0.2/plugins/ii-ramis/scripts/install.ps1 | iex
-# Ставится версия с тега релиза (v1.0.2), а не с ветки main. Режим «без вопросов» (bypass) установщик не включает никогда,
-# согласие на сводки даётся только ответом «да» живого человека в окне PowerShell. Если установщик запущен из Claude (переменные
-# CLAUDECODE/CLAUDE_CODE_*/AI_AGENT или программа claude среди предков), он ставит только плагины и безопасные пакеты.
-# Параметры при запуске файла: -DryRun  -Share yes|no  -Name "Имя"  -SkipThirdParty
-# При запуске через `| iex` параметры задаются переменными окружения: IIRAMIS_DRYRUN=1, IIRAMIS_SHARE=yes|no, IIRAMIS_NAME
+# Installer of the 'II Ramis' package for Windows (PowerShell). Idempotent: safe to run again.
+# Run:  irm https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/v1.0.3/plugins/ii-ramis/scripts/install.ps1 | iex
+# The installer itself is fetched from an immutable tag (v1.0.3); the plugin follows the stable branch with auto-update on.
+# This file is ASCII ONLY (Russian strings are built from ~uXXXX codes by function T), so it reads the same via irm | iex
+# and via powershell -File in Windows PowerShell 5.1 without a BOM. The installer never enables bypass mode,
+# and the installer does not ask the session-recap sharing consent: ii-ramis asks it once in the chat on the first greeting.
+# File parameters: -DryRun  -SkipThirdParty
+# With `| iex` the parameter is an env var: IIRAMIS_DRYRUN=1
 param(
   [switch]$DryRun,
-  [string]$Share = '',
-  [string]$Name = '',
   [switch]$SkipThirdParty
 )
 
 $ErrorActionPreference = 'Continue'
-if ($env:IIRAMIS_DRYRUN -eq '1') { $DryRun = $true }
-if (-not $Share -and $env:IIRAMIS_SHARE) { $Share = $env:IIRAMIS_SHARE }
-if (-not $Name -and $env:IIRAMIS_NAME) { $Name = $env:IIRAMIS_NAME }
-
-$ReleaseTag = 'v1.0.2'
-$RawBase = if ($env:IIRAMIS_RAW_BASE) { $env:IIRAMIS_RAW_BASE } else { "https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/$ReleaseTag/plugins/ii-ramis/scripts" }
-$MarketplaceSource = if ($env:IIRAMIS_MARKETPLACE_SOURCE) { $env:IIRAMIS_MARKETPLACE_SOURCE } else { "RamisGit-cyber/ii-ramis#$ReleaseTag" }
-# Запущен ли установщик из Claude (агентом), а не человеком. Два независимых признака: переменные, которые Claude Code
-# выставляет дочерним процессам (CLAUDECODE, CLAUDE_CODE_*, AI_AGENT), и программа claude среди предков процесса.
-# Псевдотерминал (winpty, conpty из скрипта) делает ввод и вывод «терминальными», поэтому сам по себе он ничего не доказывает.
-function Get-AgentReason {
-  $marker = Get-ChildItem env: -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^(CLAUDECODE|CLAUDE_CODE_.*|AI_AGENT)$' -and $_.Value } | Select-Object -First 1
-  if ($marker) { return "переменная $($marker.Name)" }
-  try {
-    $current = $PID
-    for ($step = 0; $step -lt 20 -and $current -gt 0; $step++) {
-      $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$current" -ErrorAction Stop
-      if (-not $proc) { break }
-      if ($proc.ProcessId -ne $PID -and ($proc.Name -match '^(claude|claude-code)(\.exe)?$' -or $proc.ExecutablePath -match '\\claude\.exe$|\\Claude\\')) { return "запущено из программы $($proc.Name)" }
-      $current = $proc.ParentProcessId
-    }
-  } catch { return "не удалось проверить родительские процессы" }
-  return $null
+# T: turns ~uXXXX tokens (UTF-16 code unit) into real characters. The whole file stays ASCII.
+function T([string]$Text) {
+  return [regex]::Replace($Text, '~u([0-9A-Fa-f]{4})', [System.Text.RegularExpressions.MatchEvaluator]{ param($m) [string][char][Convert]::ToInt32($m.Groups[1].Value, 16) })
 }
-$AgentReason = Get-AgentReason
-# Живой человек в окне PowerShell: ввод и вывод не перенаправлены И нас запустил не Claude.
-$Interactive = (-not $AgentReason) -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected
+if ($env:IIRAMIS_DRYRUN -eq '1') { $DryRun = $true }
+
+$ReleaseTag = 'v1.0.3'
+$ChannelRef = 'stable'
+$RawBase = if ($env:IIRAMIS_RAW_BASE) { $env:IIRAMIS_RAW_BASE } else { "https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/$ReleaseTag/plugins/ii-ramis/scripts" }
+$MarketplaceSource = if ($env:IIRAMIS_MARKETPLACE_SOURCE) { $env:IIRAMIS_MARKETPLACE_SOURCE } else { "RamisGit-cyber/ii-ramis#$ChannelRef" }
 $Report = New-Object System.Collections.ArrayList
 
 function Add-Report([string]$Status, [string]$What, [string]$Detail) {
-  if ($DryRun) { $Detail = "(проба) $Detail" }
+  if ($DryRun) { $Detail = (T "(~u043F~u0440~u043E~u0431~u0430) $Detail") }
   [void]$Report.Add([pscustomobject]@{ Status = $Status; What = $What; Detail = $Detail })
 }
 function Test-Command([string]$CommandName) { return [bool](Get-Command $CommandName -ErrorAction SilentlyContinue) }
@@ -53,80 +35,78 @@ function Update-SessionPath {
   $env:Path = "$machine;$user;$env:USERPROFILE\.local\bin"
 }
 function Install-WithWinget([string]$PackageId) {
-  if ($DryRun) { Write-Host "  [проба] winget install $PackageId"; return $true }
+  if ($DryRun) { Write-Host (T "  [~u043F~u0440~u043E~u0431~u0430] winget install $PackageId"); return $true }
   if (-not (Test-Command 'winget')) { return $false }
   winget install --id $PackageId -e --silent --accept-package-agreements --accept-source-agreements | Out-Null
   Update-SessionPath
   return ($LASTEXITCODE -eq 0)
 }
 
-Write-Host 'ИИ Рамис: установка пакета. Это займёт несколько минут.'
-if ($DryRun) { Write-Host '(режим пробы: ничего не меняю)' }
+Write-Host (T '~u0418~u0418 ~u0420~u0430~u043C~u0438~u0441: ~u0443~u0441~u0442~u0430~u043D~u043E~u0432~u043A~u0430 ~u043F~u0430~u043A~u0435~u0442~u0430. ~u042D~u0442~u043E ~u0437~u0430~u0439~u043C~u0451~u0442 ~u043D~u0435~u0441~u043A~u043E~u043B~u044C~u043A~u043E ~u043C~u0438~u043D~u0443~u0442.')
+if ($DryRun) { Write-Host (T '(~u0440~u0435~u0436~u0438~u043C ~u043F~u0440~u043E~u0431~u044B: ~u043D~u0438~u0447~u0435~u0433~u043E ~u043D~u0435 ~u043C~u0435~u043D~u044F~u044E)') }
 Update-SessionPath
 
-# ---------- 1. Базовые инструменты ----------
+# ---------- 1. Base tools ----------
 if (Test-Command 'git') {
   Add-Report 'ok' 'Git' ((git --version) -join ' ')
 } elseif (Install-WithWinget 'Git.Git') {
-  Add-Report 'done' 'Git' 'поставлен через winget'
+  Add-Report 'done' 'Git' (T '~u043F~u043E~u0441~u0442~u0430~u0432~u043B~u0435~u043D ~u0447~u0435~u0440~u0435~u0437 winget')
 } else {
-  Add-Report 'need' 'Git' 'Скачай с git-scm.com/downloads/win (везде Next, потом Finish), закрой Claude полностью и запусти установщик ещё раз.'
+  Add-Report 'need' 'Git' (T '~u0421~u043A~u0430~u0447~u0430~u0439 ~u0441 git-scm.com/downloads/win (~u0432~u0435~u0437~u0434~u0435 Next, ~u043F~u043E~u0442~u043E~u043C Finish), ~u0437~u0430~u043A~u0440~u043E~u0439 Claude ~u043F~u043E~u043B~u043D~u043E~u0441~u0442~u044C~u044E ~u0438 ~u0437~u0430~u043F~u0443~u0441~u0442~u0438 ~u0443~u0441~u0442~u0430~u043D~u043E~u0432~u0449~u0438~u043A ~u0435~u0449~u0451 ~u0440~u0430~u0437.')
 }
 
 if (Test-Command 'node') {
   Add-Report 'ok' 'Node.js' ((node --version) -join ' ')
 } elseif (Install-WithWinget 'OpenJS.NodeJS.LTS') {
-  Add-Report 'done' 'Node.js' 'поставлен через winget'
+  Add-Report 'done' 'Node.js' (T '~u043F~u043E~u0441~u0442~u0430~u0432~u043B~u0435~u043D ~u0447~u0435~u0440~u0435~u0437 winget')
 } else {
-  Add-Report 'need' 'Node.js' 'Скачай LTS на nodejs.org и запусти установщик ещё раз.'
+  Add-Report 'need' 'Node.js' (T '~u0421~u043A~u0430~u0447~u0430~u0439 LTS ~u043D~u0430 nodejs.org ~u0438 ~u0437~u0430~u043F~u0443~u0441~u0442~u0438 ~u0443~u0441~u0442~u0430~u043D~u043E~u0432~u0449~u0438~u043A ~u0435~u0449~u0451 ~u0440~u0430~u0437.')
 }
 
 if (Test-Command 'python') {
   Add-Report 'ok' 'Python' ((python --version 2>&1) -join ' ')
 } elseif (Install-WithWinget 'Python.Python.3.12') {
-  Add-Report 'done' 'Python' 'поставлен через winget'
+  Add-Report 'done' 'Python' (T '~u043F~u043E~u0441~u0442~u0430~u0432~u043B~u0435~u043D ~u0447~u0435~u0440~u0435~u0437 winget')
 } else {
-  Add-Report 'skip' 'Python' 'не обязателен для урока 4, поставим позже'
+  Add-Report 'skip' 'Python' (T '~u043D~u0435 ~u043E~u0431~u044F~u0437~u0430~u0442~u0435~u043B~u0435~u043D ~u0434~u043B~u044F ~u0443~u0440~u043E~u043A~u0430 4, ~u043F~u043E~u0441~u0442~u0430~u0432~u0438~u043C ~u043F~u043E~u0437~u0436~u0435')
 }
 
 if (Test-Command 'gh') {
   Add-Report 'ok' 'GitHub CLI (gh)' ((gh --version | Select-Object -First 1) -join ' ')
 } elseif (Install-WithWinget 'GitHub.cli') {
-  Add-Report 'done' 'GitHub CLI (gh)' 'поставлен через winget'
+  Add-Report 'done' 'GitHub CLI (gh)' (T '~u043F~u043E~u0441~u0442~u0430~u0432~u043B~u0435~u043D ~u0447~u0435~u0440~u0435~u0437 winget')
 } else {
-  Add-Report 'skip' 'GitHub CLI (gh)' 'поставит ИИ Рамис на уроке про GitHub'
+  Add-Report 'skip' 'GitHub CLI (gh)' (T '~u043F~u043E~u0441~u0442~u0430~u0432~u0438~u0442 ~u0418~u0418 ~u0420~u0430~u043C~u0438~u0441 ~u043D~u0430 ~u0443~u0440~u043E~u043A~u0435 ~u043F~u0440~u043E GitHub')
 }
 if (Test-Command 'gh') {
   gh auth status 2>$null | Out-Null
-  if ($LASTEXITCODE -eq 0) { Add-Report 'ok' 'Вход в GitHub' 'выполнен' }
-  else { Add-Report 'need' 'Вход в GitHub' 'Нужен один раз в браузере: ИИ Рамис проведёт, когда понадобится (команда gh auth login).' }
+  if ($LASTEXITCODE -eq 0) { Add-Report 'ok' (T '~u0412~u0445~u043E~u0434 ~u0432 GitHub') (T '~u0432~u044B~u043F~u043E~u043B~u043D~u0435~u043D') }
+  else { Add-Report 'need' (T '~u0412~u0445~u043E~u0434 ~u0432 GitHub') (T '~u041D~u0443~u0436~u0435~u043D ~u043E~u0434~u0438~u043D ~u0440~u0430~u0437 ~u0432 ~u0431~u0440~u0430~u0443~u0437~u0435~u0440~u0435: ~u0418~u0418 ~u0420~u0430~u043C~u0438~u0441 ~u043F~u0440~u043E~u0432~u0435~u0434~u0451~u0442, ~u043A~u043E~u0433~u0434~u0430 ~u043F~u043E~u043D~u0430~u0434~u043E~u0431~u0438~u0442~u0441~u044F (~u043A~u043E~u043C~u0430~u043D~u0434~u0430 gh auth login).') }
 }
 
-# ---------- 2. Скрипт настроек (рядом лежит или скачиваем) ----------
+# ---------- 2. Settings script (lies next to us or is downloaded) ----------
 $NodeAvailable = Test-Command 'node'
 $SetupJs = $null
 if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot 'setup-settings.mjs'))) {
   $SetupJs = Join-Path $PSScriptRoot 'setup-settings.mjs'
-  if (-not $DryRun) {   # копия в .ii-ramis: по ней ученик сам включает режим «без вопросов» из PowerShell
+  if (-not $DryRun) {   # copy into .ii-ramis: the student enables bypass mode from PowerShell with it
     $dataDirCopy = Join-Path $env:USERPROFILE '.ii-ramis'
     New-Item -ItemType Directory -Force -Path $dataDirCopy | Out-Null
     Copy-Item -Force $SetupJs (Join-Path $dataDirCopy 'setup-settings.mjs')
-    Copy-Item -Force (Join-Path $PSScriptRoot 'agent-context.mjs') (Join-Path $dataDirCopy 'agent-context.mjs')
   }
 } elseif ($NodeAvailable -and -not $DryRun) {
   $dataDir = Join-Path $env:USERPROFILE '.ii-ramis'
   New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
   $SetupJs = Join-Path $dataDir 'setup-settings.mjs'
   try {
-    Invoke-WebRequest -UseBasicParsing -Uri "$RawBase/agent-context.mjs" -OutFile (Join-Path $dataDir 'agent-context.mjs') -TimeoutSec 30
     Invoke-WebRequest -UseBasicParsing -Uri "$RawBase/setup-settings.mjs" -OutFile $SetupJs -TimeoutSec 30
   }
-  catch { $SetupJs = $null; Write-Host "Не скачал setup-settings.mjs: $($_.Exception.Message)" }
+  catch { $SetupJs = $null; Write-Host (T "~u041D~u0435 ~u0441~u043A~u0430~u0447~u0430~u043B setup-settings.mjs: $($_.Exception.Message)") }
 }
 function Invoke-Setup([string[]]$SetupArgs) {
   if (-not $NodeAvailable -or -not $SetupJs) {
-    if ($DryRun) { Write-Host "  [проба] node setup-settings.mjs $($SetupArgs -join ' ')"; return @{ Ok = $true; Output = '' } }
-    return @{ Ok = $false; Output = 'нет Node.js или скрипта настроек' }
+    if ($DryRun) { Write-Host (T "  [~u043F~u0440~u043E~u0431~u0430] node setup-settings.mjs $($SetupArgs -join ' ')"); return @{ Ok = $true; Output = '' } }
+    return @{ Ok = $false; Output = (T '~u043D~u0435~u0442 Node.js ~u0438~u043B~u0438 ~u0441~u043A~u0440~u0438~u043F~u0442~u0430 ~u043D~u0430~u0441~u0442~u0440~u043E~u0435~u043A') }
   }
   $all = @($SetupJs) + $SetupArgs
   if ($DryRun) { $all += '--dry-run' }
@@ -134,50 +114,48 @@ function Invoke-Setup([string[]]$SetupArgs) {
   return @{ Ok = ($LASTEXITCODE -eq 0); Output = ($output -join '; ') }
 }
 
-# ---------- 3. Согласие на отправку итогов ----------
-if (-not $Interactive -and $Share -eq 'yes') {
-  $why = if ($AgentReason) { " ($AgentReason)" } else { '' }
-  Write-Host "Параметр Share=yes проигнорирован: установщик запущен не живым человеком в обычном окне PowerShell$why. Согласие на отправку итогов даёшь только ты сам: открой PowerShell (не окно Claude) и запусти установщик там."
-  $Share = ''; $Name = ''
-}
-if (-not $Share -and -not $DryRun -and $Interactive) {
-  Write-Host ''
-  Write-Host 'Рамис хочет видеть, где ты застрял, чтобы помочь. Для этого после занятия можно отправлять КРАТКИЙ итог:'
-  Write-Host 'номер урока, сколько раз застрял, какие ошибки (без путей и ключей). Кода и твоих файлов в нём нет.'
-  $answer = Read-Host 'Отправлять итог Рамису? [y/N]'
-  if ($answer -match '^(y|д)') { $Share = 'yes' } else { $Share = 'no' }
-}
-
-# ---------- 4. Плагины и MCP ----------
+# ---------- 3. Plugins and MCP ----------
 $ClaudeAvailable = Test-Command 'claude'
+
+function Update-OwnMarketplace {
+  # The source in settings is already switched to stable (setup-settings.mjs), so add accepts it and re-clones.
+  # No remove: it would delete the student's plugin together with its data.
+  if ($DryRun) { return }
+  claude plugin marketplace add $MarketplaceSource 2>&1 | Out-Null
+  claude plugin marketplace update ii-ramis 2>&1 | Out-Null
+}
 
 function Install-Plugin([string]$MarketplaceName, [string]$MarketplaceSrc, [string]$Plugin) {
   $id = "$Plugin@$MarketplaceName"
   if ($ClaudeAvailable) {
     $installed = (claude plugin list 2>$null) -join "`n"
-    if ($installed -match [regex]::Escape($id)) { Add-Report 'ok' "Плагин $Plugin" 'уже установлен'; return }
+    if ($installed -match [regex]::Escape($id)) {
+      # already installed: still rebind our marketplace to stable and refresh it (student coming from v1.0.2)
+      if ($MarketplaceName -eq 'ii-ramis') { Update-OwnMarketplace }
+      Add-Report 'ok' (T "~u041F~u043B~u0430~u0433~u0438~u043D $Plugin") (T '~u0443~u0436~u0435 ~u0443~u0441~u0442~u0430~u043D~u043E~u0432~u043B~u0435~u043D'); return
+    }
     if (-not $DryRun) {
       claude plugin marketplace add $MarketplaceSrc 2>&1 | Out-Null
       claude plugin install $id 2>&1 | Out-Null
     }
-    if ($DryRun -or $LASTEXITCODE -eq 0) { Add-Report 'done' "Плагин $Plugin" 'установлен через claude plugin install'; return }
+    if ($DryRun -or $LASTEXITCODE -eq 0) { Add-Report 'done' (T "~u041F~u043B~u0430~u0433~u0438~u043D $Plugin") (T '~u0443~u0441~u0442~u0430~u043D~u043E~u0432~u043B~u0435~u043D ~u0447~u0435~u0440~u0435~u0437 claude plugin install'); return }
   }
   $result = Invoke-Setup @('--marketplace', $MarketplaceName, '--enable', $id)
-  if ($result.Ok) { Add-Report 'done' "Плагин $Plugin" 'включён в настройках, скачается при следующем запуске Claude' }
-  else { Add-Report 'fail' "Плагин $Plugin" $result.Output }
+  if ($result.Ok) { Add-Report 'done' (T "~u041F~u043B~u0430~u0433~u0438~u043D $Plugin") (T '~u0432~u043A~u043B~u044E~u0447~u0451~u043D ~u0432 ~u043D~u0430~u0441~u0442~u0440~u043E~u0439~u043A~u0430~u0445, ~u0441~u043A~u0430~u0447~u0430~u0435~u0442~u0441~u044F ~u043F~u0440~u0438 ~u0441~u043B~u0435~u0434~u0443~u044E~u0449~u0435~u043C ~u0437~u0430~u043F~u0443~u0441~u043A~u0435 Claude') }
+  else { Add-Report 'fail' (T "~u041F~u043B~u0430~u0433~u0438~u043D $Plugin") $result.Output }
 }
 
 function Install-Mcp([string]$McpName, [string[]]$McpCommand) {
   if ($ClaudeAvailable) {
     claude mcp get $McpName 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0) { Add-Report 'ok' "MCP $McpName" 'уже подключён'; return }
+    if ($LASTEXITCODE -eq 0) { Add-Report 'ok' "MCP $McpName" (T '~u0443~u0436~u0435 ~u043F~u043E~u0434~u043A~u043B~u044E~u0447~u0451~u043D'); return }
     if (-not $DryRun) {
       claude mcp add --scope user $McpName -- cmd /c @McpCommand 2>&1 | Out-Null
-      if ($LASTEXITCODE -eq 0) { Add-Report 'done' "MCP $McpName" 'подключён'; return }
+      if ($LASTEXITCODE -eq 0) { Add-Report 'done' "MCP $McpName" (T '~u043F~u043E~u0434~u043A~u043B~u044E~u0447~u0451~u043D'); return }
     }
   }
   $result = Invoke-Setup @('--mcp', $McpName)
-  if ($result.Ok) { Add-Report 'done' "MCP $McpName" 'добавлен в .claude.json' }
+  if ($result.Ok) { Add-Report 'done' "MCP $McpName" (T '~u0434~u043E~u0431~u0430~u0432~u043B~u0435~u043D ~u0432 .claude.json') }
   else { Add-Report 'fail' "MCP $McpName" $result.Output }
 }
 
@@ -188,45 +166,38 @@ if (-not $SkipThirdParty) {
   Install-Mcp 'context7' @('npx', '-y', '@upstash/context7-mcp')
   Install-Mcp 'playwright' @('npx', '@playwright/mcp@latest')
 }
+# Settings first (stable source + auto-update), claude commands after: otherwise `marketplace add` with a new ref
+# is refused because it does not match the settings entry (checked on Claude Code 2.1.316).
+[void](Invoke-Setup @('--marketplace', 'ii-ramis', '--auto-update', 'ii-ramis'))
 Install-Plugin 'ii-ramis' $MarketplaceSource 'ii-ramis'
 
-# ---------- 5. Настройки: маркетплейс с тега, согласие ----------
-# Автообновление НЕ включаем: обновляться на новую версию ученик будет сам (см. README).
-$setupArgs = @('--marketplace', 'ii-ramis')
-if ($Share -eq 'no') { $setupArgs += @('--share', 'no') }   # «нет» безопасно откуда угодно; «да» идёт отдельным шагом ниже, прямо в окно
+# ---------- 4. Settings: marketplace on stable with auto-update ----------
+# Auto-update is on only for the ii-ramis marketplace. If the student turned it off (autoUpdate: false), we leave it.
+$setupArgs = @('--marketplace', 'ii-ramis', '--auto-update', 'ii-ramis')
 $settingsResult = Invoke-Setup $setupArgs
-if ($settingsResult.Ok) { Add-Report 'done' 'Настройки Claude' $settingsResult.Output }
-else { Add-Report 'fail' 'Настройки Claude' $settingsResult.Output }
+if ($settingsResult.Ok) { Add-Report 'done' (T '~u041D~u0430~u0441~u0442~u0440~u043E~u0439~u043A~u0438 Claude') $settingsResult.Output }
+else { Add-Report 'fail' (T '~u041D~u0430~u0441~u0442~u0440~u043E~u0439~u043A~u0438 Claude') $settingsResult.Output }
 
-# Согласие «да» на сводки: setup-settings.mjs запускается без перехвата вывода и сам повторно проверяет, что он не под Claude.
-if ($Share -eq 'yes' -and $Interactive -and $NodeAvailable -and $SetupJs) {
-  $shareArgs = @('--share', 'yes')
-  if ($Name) { $shareArgs += @('--student-name', $Name) }
-  if ($DryRun) { $shareArgs += '--dry-run' }
-  & node $SetupJs @shareArgs
-  Add-Report 'done' 'Отправка итогов Рамису' 'согласие записано (подробности выше)'
-} elseif ($AgentReason) {
-  Add-Report 'need' 'Отправка итогов Рамису' 'не включена: установщик запущен из Claude. Согласие даёшь только ты сам: запусти установщик в обычном окне PowerShell (не в окне Claude).'
-}
+Add-Report 'skip' (T '~u041F~u0435~u0440~u0435~u0441~u043A~u0430~u0437~u044B ~u0437~u0430~u043D~u044F~u0442~u0438~u0439 ~u0420~u0430~u043C~u0438~u0441~u0443') (T '~u043F~u043E ~u0443~u043C~u043E~u043B~u0447~u0430~u043D~u0438~u044E ~u0432~u044B~u043A~u043B~u044E~u0447~u0435~u043D~u044B. ~u0418~u0418 ~u0420~u0430~u043C~u0438~u0441 ~u043E~u0434~u0438~u043D ~u0440~u0430~u0437 ~u0441~u043F~u0440~u043E~u0441~u0438~u0442 ~u0441~u043E~u0433~u043B~u0430~u0441~u0438~u0435 ~u0432 ~u0447~u0430~u0442~u0435 ~u043F~u0440~u0438 ~u043F~u0435~u0440~u0432~u043E~u043C ~u00AB~u043F~u0440~u0438~u0432~u0435~u0442~u00BB; ~u043E~u0442~u0432~u0435~u0442 ~u00AB~u043D~u0435~u0442~u00BB ~u043D~u0438~u0447~u0435~u0433~u043E ~u043D~u0435 ~u043E~u0442~u043F~u0440~u0430~u0432~u043B~u044F~u0435~u0442.')
 
-# Режим «без вопросов» (bypass) установщик НЕ включает вообще: только ты сам.
-Add-Report 'need' 'Режим «без вопросов»' 'не включён и никакой скрипт его не включает. Хочешь сам: Claude Desktop -> Settings -> Code -> «Allow bypass permissions mode» (или правка settings.json, см. README)'
+# Bypass mode is NOT enabled by the installer at all: only the student can.
+Add-Report 'need' (T '~u0420~u0435~u0436~u0438~u043C ~u00AB~u0431~u0435~u0437 ~u0432~u043E~u043F~u0440~u043E~u0441~u043E~u0432~u00BB') (T '~u043D~u0435 ~u0432~u043A~u043B~u044E~u0447~u0451~u043D ~u0438 ~u043D~u0438~u043A~u0430~u043A~u043E~u0439 ~u0441~u043A~u0440~u0438~u043F~u0442 ~u0435~u0433~u043E ~u043D~u0435 ~u0432~u043A~u043B~u044E~u0447~u0430~u0435~u0442. ~u0425~u043E~u0447~u0435~u0448~u044C ~u0441~u0430~u043C: Claude Desktop -> Settings -> Code -> ~u00ABAllow bypass permissions mode~u00BB (~u0438~u043B~u0438 ~u043F~u0440~u0430~u0432~u043A~u0430 settings.json, ~u0441~u043C. README)')
 
-# ---------- 6. Итог ----------
+# ---------- 5. Summary ----------
 Write-Host ''
-Write-Host '===== Что сделано ====='
+Write-Host (T '===== ~u0427~u0442~u043E ~u0441~u0434~u0435~u043B~u0430~u043D~u043E =====')
 $hasFail = $false
 foreach ($item in $Report) {
   $mark = switch ($item.Status) {
-    'ok' { '[уже было]' }
-    'done' { '[сделано]' }
-    'skip' { '[пропущено]' }
-    'need' { '[нужно от тебя]' }
-    'fail' { '[не вышло]'; $hasFail = $true }
+    'ok' { (T '[~u0443~u0436~u0435 ~u0431~u044B~u043B~u043E]') }
+    'done' { (T '[~u0441~u0434~u0435~u043B~u0430~u043D~u043E]') }
+    'skip' { (T '[~u043F~u0440~u043E~u043F~u0443~u0449~u0435~u043D~u043E]') }
+    'need' { (T '[~u043D~u0443~u0436~u043D~u043E ~u043E~u0442 ~u0442~u0435~u0431~u044F]') }
+    'fail' { (T '[~u043D~u0435 ~u0432~u044B~u0448~u043B~u043E]'); $hasFail = $true }
   }
   Write-Host "$mark $($item.What): $($item.Detail)"
 }
 Write-Host ''
-Write-Host 'Дальше: полностью закрой Claude (и в трее) и открой заново, затем напиши в чате «привет». Если что-то не вышло, скажи об этом ИИ Рамису в чате.'
-Write-Host 'Режим «без вопросов» установщик не включает: это только твой тумблер в Claude Desktop (Settings -> Code). Обновления плагина сами не приходят: как обновить, написано в README.'
+Write-Host (T '~u0414~u0430~u043B~u044C~u0448~u0435: ~u043F~u043E~u043B~u043D~u043E~u0441~u0442~u044C~u044E ~u0437~u0430~u043A~u0440~u043E~u0439 Claude (~u0438 ~u0432 ~u0442~u0440~u0435~u0435) ~u0438 ~u043E~u0442~u043A~u0440~u043E~u0439 ~u0437~u0430~u043D~u043E~u0432~u043E, ~u0437~u0430~u0442~u0435~u043C ~u043D~u0430~u043F~u0438~u0448~u0438 ~u0432 ~u0447~u0430~u0442~u0435 ~u00AB~u043F~u0440~u0438~u0432~u0435~u0442~u00BB. ~u0415~u0441~u043B~u0438 ~u0447~u0442~u043E-~u0442~u043E ~u043D~u0435 ~u0432~u044B~u0448~u043B~u043E, ~u0441~u043A~u0430~u0436~u0438 ~u043E~u0431 ~u044D~u0442~u043E~u043C ~u0418~u0418 ~u0420~u0430~u043C~u0438~u0441~u0443 ~u0432 ~u0447~u0430~u0442~u0435.')
+Write-Host (T '~u0420~u0435~u0436~u0438~u043C ~u00AB~u0431~u0435~u0437 ~u0432~u043E~u043F~u0440~u043E~u0441~u043E~u0432~u00BB ~u0443~u0441~u0442~u0430~u043D~u043E~u0432~u0449~u0438~u043A ~u043D~u0435 ~u0432~u043A~u043B~u044E~u0447~u0430~u0435~u0442: ~u044D~u0442~u043E ~u0442~u043E~u043B~u044C~u043A~u043E ~u0442~u0432~u043E~u0439 ~u0442~u0443~u043C~u0431~u043B~u0435~u0440 ~u0432 Claude Desktop (Settings -> Code). ~u041F~u043B~u0430~u0433~u0438~u043D ~u043E~u0431~u043D~u043E~u0432~u043B~u044F~u0435~u0442~u0441~u044F ~u0441~u0430~u043C (~u0430~u0432~u0442~u043E~u043E~u0431~u043D~u043E~u0432~u043B~u0435~u043D~u0438~u0435 ~u0432~u043A~u043B~u044E~u0447~u0435~u043D~u043E); ~u043A~u0430~u043A ~u044D~u0442~u043E ~u043E~u0442~u043A~u043B~u044E~u0447~u0438~u0442~u044C, ~u043D~u0430~u043F~u0438~u0441~u0430~u043D~u043E ~u0432 README.')
 if ($hasFail) { exit 1 }
