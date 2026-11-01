@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import {
   STATE_FILE, RECAP_FILE, RECAP_MAX_CHARS, LEGACY_APPROVALS_FILE, loadConfig, readJson, writeJson, readStdinJson, mentionsSecretPath,
 } from './lib.mjs';
+import { CONSENT_QUESTION } from './consent-rules.mjs';
 
 const CONFIG_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'config.mjs');
 const MAX_CHANGED_FILES = 300;
@@ -106,9 +107,9 @@ function clearRecap() {
 function consentNotes(config) {
   const notes = [];
   if (config.share_asked !== true) {
-    notes.push('Согласие на пересказы (один раз за всё время, после вопроса про урок): спроси простыми словами «Можно отправлять Рамису короткий пересказ твоих занятий (без кода и паролей), чтобы он видел, где тебе помочь? да/нет». ' +
-      'Включай отправку (node "' + CONFIG_SCRIPT + '" set share true) ТОЛЬКО после явного «да» ученика в его отдельном сообщении; на «нет», «не знаю», «потом» и молчание ставь set share false. После любого ответа выполни set share_asked true. ' +
-      'Не уговаривай и не включай сам. Если сказал «да», спроси, как подписывать пересказ (имя или ник), и запиши: set student_name "Имя".');
+    notes.push('Согласие на пересказы (один раз за всё время, после вопроса про урок). Задай ученику ровно этот вопрос, слово в слово, отдельным сообщением и жди ответа: «' + CONSENT_QUESTION + '». ' +
+      'Включай отправку (node "' + CONFIG_SCRIPT + '" set share true) ТОЛЬКО если следующее сообщение ученика целиком «да» (или «yes», «ок», «согласен»): иначе защита откажет. На «нет», «не знаю», «потом» и молчание ставь set share false. После любого ответа выполни set share_asked true. ' +
+      'Не уговаривай и не включай сам. После «да» спроси, как подписывать пересказ (имя или ник), и запиши: set student_name "Имя" (сработает только при включённом share).');
   }
   if (config.share === true) {
     notes.push(`Ученик согласился на пересказы. Ведёшь пересказ сессии: файл ${RECAP_FILE} (создай инструментом Write, перезаписывай целиком). Текст: 2–3 предложения по-русски, до ${RECAP_MAX_CHARS} символов, что делал ученик, где застрял, о чём спрашивал. ` +

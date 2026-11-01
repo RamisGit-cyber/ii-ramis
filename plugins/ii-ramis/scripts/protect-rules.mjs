@@ -120,13 +120,15 @@ function resolvesToScript(token, names, cwd) {
   return path.dirname(resolved) === path.join(PLUGIN_ROOT, 'scripts') && names.has(path.basename(resolved));
 }
 
-function isConfigSet(args) {
+// consent: { shareConsent(): boolean, nameAllowed(): boolean }. Без него (или при false) share=true и student_name не проходят.
+function isConfigSet(args, consent = {}) {
   return args.length === 3 && args[0] === 'set' && (
     (args[1] === 'lesson' && /^\d{1,2}$/.test(args[2])) || (args[1] === 'autosave' && /^(true|false)$/.test(args[2])) ||
     (args[1] === 'checked' && /^(true|false)$/.test(args[2])) ||
-    // согласие на пересказы даёт ученик в чате; что он написал «да» явным сообщением, проверяет consent-rules.mjs
-    (args[1] === 'share' && /^(true|false)$/.test(args[2])) || (args[1] === 'share_asked' && args[2] === 'true') ||
-    (args[1] === 'student_name' && /^[\p{L}\p{N} ._-]{1,40}$/u.test(args[2])));
+    (args[1] === 'share' && args[2] === 'false') || // выключить отправку можно всегда
+    (args[1] === 'share' && args[2] === 'true' && consent.shareConsent?.() === true) || // включить: только после подтверждённого «да» (consent-rules.mjs)
+    (args[1] === 'share_asked' && args[2] === 'true') ||
+    (args[1] === 'student_name' && /^[\p{L}\p{N} ._-]{1,40}$/u.test(args[2]) && consent.nameAllowed?.() === true));
 }
 
 function isPluginCommand(tokens) {
@@ -137,13 +139,13 @@ function isPluginCommand(tokens) {
 }
 
 // Свой скрипт: команда начинается прямо с него (без env-присваиваний и обёрток), других упоминаний защищённых мест нет.
-function isOwnScriptCall(cmd, mentioned, cwd) {
+function isOwnScriptCall(cmd, mentioned, cwd, consent) {
   const { tokens } = cmd;
   if (mentioned.length !== 1 || cmd.pipedInto || cmd.prev || cmd.inSubstitution) return false;
   const at = mentioned[0];
   const runner = verbName(tokens[0]);
   if (resolvesToScript(tokens[at], new Set(['config.mjs']), cwd)) {
-    return runner === 'node' && at === 1 && isConfigSet(tokens.slice(2));
+    return runner === 'node' && at === 1 && isConfigSet(tokens.slice(2), consent);
   }
   if (!resolvesToScript(tokens[at], DIAGNOSE_SCRIPTS, cwd)) return false;
   const args = tokens.slice(at + 1);
@@ -173,7 +175,7 @@ function hasUnresolvableWriteTarget(tokens, first) {
   return redirectToVariable || writer;
 }
 
-export function checkProtectedShell(commands, cwd) {
+export function checkProtectedShell(commands, cwd, consent = {}) {
   const movesIntoProtected = commands.some((cmd) => {
     const at = cmd.tokens.findIndex((t) => CD_VERBS.has(verbName(t)));
     return at !== -1 && cmd.tokens.slice(at + 1).some((t) => !t.startsWith('-') && isProtectedDir(t, cwd));
@@ -192,7 +194,7 @@ export function checkProtectedShell(commands, cwd) {
     if (movesIntoProtected && !isCd && (first === -1 || !readOnlyUse(tokens, first) || redirected)) return REASON;
     if (mentioned.length === 0) continue;
     const redirectedIntoProtected = mentioned.some((i) => isRedirectTarget(tokens, i));
-    if (!redirectedIntoProtected && isOwnScriptCall(cmd, mentioned, cwd)) continue;
+    if (!redirectedIntoProtected && isOwnScriptCall(cmd, mentioned, cwd, consent)) continue;
     if (first !== -1 && !redirectedIntoProtected && !cmd.pipedInto && readOnlyUse(tokens, first)) continue;
     return REASON;
   }

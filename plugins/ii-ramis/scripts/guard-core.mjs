@@ -8,7 +8,7 @@ import {
 } from './guard-rules.mjs';
 import { checkProtectedShell, checkProtectedFileWrite } from './protect-rules.mjs';
 import { checkWebFetch } from './web-rules.mjs';
-import { checkConsentCommand } from './consent-rules.mjs';
+import { checkConsentCommand, shareConsentGiven, nameMayBeSet } from './consent-rules.mjs';
 import { checkInstallerLaunch, checkTerminalWrappers, checkAgentMarkerTampering } from './installer-rules.mjs';
 
 const WRITE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -50,8 +50,8 @@ function shellReason(toolName, toolInput, cwd, transcriptPath) {
     checkInstallerLaunch(parsed.commands) ||
     checkTerminalWrappers(parsed.commands) ||
     checkAgentMarkerTampering(parsed.commands) ||
-    checkProtectedShell(parsed.commands, cwd) ||
     checkConsentCommand(parsed.commands, transcriptPath) ||
+    checkProtectedShell(parsed.commands, cwd, { shareConsent: () => shareConsentGiven(transcriptPath), nameAllowed: nameMayBeSet }) ||
     checkSecrets(parsed.commands) ||
     checkEnvironmentDump(parsed.commands) ||
     checkDeletion(parsed.commands, cwd) ||

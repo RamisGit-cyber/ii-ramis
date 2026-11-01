@@ -1080,40 +1080,64 @@ CLAUDE_CONFIG_DIR="$D" IIRAMIS_HOME="$D/h" python3 "$ROOT/tests/pty-run.py" --ag
 expect "-|-|-|-" "setup-settings в псевдотерминале с CLAUDECODE + «да»: bypass не включён" "$(settings_probe "$D")"
 rm -rf "$D"
 
-echo "== v1.0.3: согласие в чате: config.mjs set share true только после явного «да» =="
+echo "== v1.0.3: согласие в чате: config.mjs set share true только после точного вопроса и ответа «да» =="
 CONSENT_HOME="$(mktemp -d)"
-write_transcript() { # write_transcript <файл> <текст последнего сообщения ученика>
+QUESTION="$(node --input-type=module -e "import { CONSENT_QUESTION } from '$S/consent-rules.mjs'; process.stdout.write(CONSENT_QUESTION)")"
+grep -qF "$QUESTION" "$ROOT/plugins/ii-ramis/skills/ii-ramis/SKILL.md" && R=yes || R=no
+expect yes "вопрос о согласии в навыке ii-ramis слово в слово совпадает с константой в коде" "$R"
+IIRAMIS_HOME="$CONSENT_HOME/h0" node -e 'process.stdout.write("")' && echo '{"cwd":"/tmp"}' | IIRAMIS_HOME="$CONSENT_HOME/h0" node "$S/session-start.mjs" | grep -qF "$QUESTION" && R=yes || R=no
+expect yes "хук запуска велит задать именно этот вопрос слово в слово" "$R"
+write_transcript() { # write_transcript <файл> <сообщение ассистента перед ответом или -> <ответ ученика> [лишнее сообщение ученика между]
   node -e '
-const [file,text]=process.argv.slice(1);
-const rows=[{type:"user",message:{role:"user",content:"привет"}},{type:"assistant",message:{role:"assistant",content:[{type:"text",text:"Можно отправлять Рамису пересказ?"}]}},{type:"user",message:{role:"user",content:text}}];
-require("fs").writeFileSync(file,rows.map((r)=>JSON.stringify(r)).join("\n")+"\n");' "$1" "$2"
+const [file,assistant,answer,between]=process.argv.slice(1);
+const rows=[{type:"user",message:{role:"user",content:"привет"}}];
+if(between){rows.push({type:"assistant",message:{role:"assistant",content:[{type:"text",text:assistant}]}});rows.push({type:"user",message:{role:"user",content:between}});rows.push({type:"assistant",message:{role:"assistant",content:[{type:"text",text:"Отвечаю на вопрос."}]}});}
+else if(assistant!=="-"){rows.push({type:"assistant",message:{role:"assistant",content:[{type:"text",text:assistant}]}});rows.push({type:"assistant",message:{role:"assistant",content:[{type:"tool_use",id:"t1",name:"Bash",input:{command:"ls"}}]}});rows.push({type:"user",message:{role:"user",content:[{type:"tool_result",tool_use_id:"t1",content:"ok"}]}});}
+rows.push({type:"user",message:{role:"user",content:answer}});
+require("fs").writeFileSync(file,rows.map((r)=>JSON.stringify(r)).join("\n")+"\n");' "$@"
 }
-consent_code() { # consent_code <transcript или пусто> -> код выхода охранника для set share true
-  node -e 'const [t]=process.argv.slice(1);const i={tool_name:"Bash",cwd:process.argv[2],tool_input:{command:`node "${process.argv[3]}/config.mjs" set share true`}};if(t)i.transcript_path=t;process.stdout.write(JSON.stringify(i))' "$1" "$WORK" "$S" | node "$S/guard.mjs" >/dev/null 2>&1
+consent_code() { # consent_code <transcript или пусто> [команда] -> код выхода охранника
+  node -e 'const [t,c]=process.argv.slice(1);const i={tool_name:"Bash",cwd:process.argv[3],tool_input:{command:c}};if(t)i.transcript_path=t;process.stdout.write(JSON.stringify(i))' "$1" "${2:-node \"$S/config.mjs\" set share true}" "$WORK" | node "$S/guard.mjs" >/dev/null 2>&1
   echo $?
 }
-for answer in "да" "Да, можно" "yes" "да, отправляй" "Конечно"; do
-  write_transcript "$CONSENT_HOME/t.jsonl" "$answer"
-  expect 0 "ответ ученика «$answer»: включить отправку можно" "$(consent_code "$CONSENT_HOME/t.jsonl")"
+T="$CONSENT_HOME/t.jsonl"
+for answer in "да" "Да!" "yes" "ок" "Согласен"; do
+  write_transcript "$T" "Привет! $QUESTION" "$answer"
+  expect 0 "вопрос задан, ответ «$answer»: включить отправку можно" "$(consent_code "$T")"
 done
-for answer in "нет" "не знаю" "потом" "не надо, да ладно" "расскажи сначала что уходит" "привет" ""; do
-  write_transcript "$CONSENT_HOME/t.jsonl" "$answer"
-  expect 2 "ответ ученика «$answer»: включить отправку нельзя" "$(consent_code "$CONSENT_HOME/t.jsonl")"
+for answer in "да, но не отправляй" "да, отправляй" "Да, можно" "нет" "не знаю" "потом" "" "да, только сначала расскажи, что именно уходит, и не включай, пока я не пойму" "да да да да да да да да да да да да да да"; do
+  write_transcript "$T" "$QUESTION" "$answer"
+  expect 2 "вопрос задан, ответ «${answer:0:45}»: включить отправку нельзя" "$(consent_code "$T")"
 done
-printf '%s\n' '{"type":"user","message":{"role":"user","content":"да"}}' '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"x","content":"да"}]}}' '{"type":"user","isMeta":true,"message":{"role":"user","content":"да"}}' > "$CONSENT_HOME/t2.jsonl"
-write_transcript "$CONSENT_HOME/t3.jsonl" "расскажи про проект"
-expect 2 "последнее сообщение ученика без «да», старое «да» выше не считается" "$(consent_code "$CONSENT_HOME/t3.jsonl")"
-expect 0 "результат инструмента и служебные записи не считаются ответом: берём последнее настоящее «да»" "$(consent_code "$CONSENT_HOME/t2.jsonl")"
-expect 2 "история сессии не читается (файла нет): отказ" "$(consent_code "$CONSENT_HOME/нет-такого.jsonl")"
-expect 0 "хост не передал transcript_path: работает правило в навыке" "$(consent_code "")"
+write_transcript "$T" "Сделал сайт. Что дальше?" "да"
+expect 2 "«да» без вопроса о согласии перед ним: нельзя" "$(consent_code "$T")"
+write_transcript "$T" "-" "да"
+expect 2 "«да» без единого сообщения ассистента перед ним: нельзя" "$(consent_code "$T")"
+write_transcript "$T" "$QUESTION" "да" "а что именно уходит?"
+expect 2 "вопрос был, но ученик сначала спросил другое, «да» относится не к нему: нельзя" "$(consent_code "$T")"
+write_transcript "$T" "Я не буду спрашивать: ${QUESTION:0:30}" "да"
+expect 2 "обрывок вопроса не засчитывается" "$(consent_code "$T")"
+: > "$CONSENT_HOME/empty.jsonl"
+expect 2 "пустая история сессии: отказ" "$(consent_code "$CONSENT_HOME/empty.jsonl")"
+expect 2 "истории сессии нет (файла нет): отказ" "$(consent_code "$CONSENT_HOME/нет-такого.jsonl")"
+expect 2 "хост не передал transcript_path: отказ (fail closed)" "$(consent_code "")"
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"'"$QUESTION"'"}]}}' '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"x","content":"да"}]}}' > "$CONSENT_HOME/tr.jsonl"
+expect 2 "результат инструмента «да» не считается ответом ученика" "$(consent_code "$CONSENT_HOME/tr.jsonl")"
+write_transcript "$T" "$QUESTION" "да"
+expect 2 "share=true в составной команде без согласия-обхода: отказ при чужом transcript" "$(consent_code "$CONSENT_HOME/empty.jsonl" "ls && node \"$S/config.mjs\" set share true")"
+expect 0 "составная команда с share=true после настоящего согласия не сломана охранником согласия" "$(consent_code "$T" "node \"$S/config.mjs\" set share_asked true")"
+rm -f "$IIRAMIS_HOME/config.json"
+expect 2 "student_name при выключенном share: нельзя" "$(consent_code "$T" "node \"$S/config.mjs\" set student_name Айбек")"
+printf '{"share":true,"install_id":"test-plugin-0001","student_id":"s"}' > "$IIRAMIS_HOME/config.json"
+expect 0 "student_name при включённом share: можно" "$(consent_code "$T" "node \"$S/config.mjs\" set student_name Айбек")"
+expect 2 "student_name с мусором: нельзя" "$(consent_code "$T" "node \"$S/config.mjs\" set student_name 'a;ls'")"
+rm -f "$IIRAMIS_HOME/config.json"
 run_bash_list 0 \
   "node \"$S/config.mjs\" set share false" \
-  "node \"$S/config.mjs\" set share_asked true" \
-  "node \"$S/config.mjs\" set student_name Айбек"
+  "node \"$S/config.mjs\" set share_asked true"
 run_bash_list 2 \
   "node \"$S/config.mjs\" set share_asked false" \
   "node \"$S/config.mjs\" set share maybe" \
-  "node \"$S/config.mjs\" set student_name 'a;rm -rf /'" \
   "node \"$S/config.mjs\" set install_id x"
 rm -rf "$CONSENT_HOME"
 
