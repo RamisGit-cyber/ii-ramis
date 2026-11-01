@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # Установщик пакета «ИИ Рамис» для macOS (и Linux). Идемпотентный: повторный запуск безопасен.
-# Запуск:  curl -fsSL https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/v1.0.1/plugins/ii-ramis/scripts/install.sh | bash
-# Ставится версия с тега релиза (v1.0.1), а не с ветки main: так ученику не прилетит непроверенный код.
+# Запуск:  curl -fsSL https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/v1.0.2/plugins/ii-ramis/scripts/install.sh | bash
+# Ставится версия с тега релиза (v1.0.2), а не с ветки main: так ученику не прилетит непроверенный код.
 # Флаги:   --dry-run  показать, что будет сделано, ничего не меняя
 #          --share yes|no   отправлять Рамису краткий итог занятий. «yes» работает ТОЛЬКО при запуске человеком в обычном
 #                           Терминале (из Claude игнорируется: согласие даёт человек, а не команда из чата)
 #          --name "Имя"     как подписывать итог (только если share=yes)
 #          --skip-third-party  поставить только плагин ИИ Рамис (для проверки)
-# Режим Claude «без вопросов» (bypass) и сводки включаются только ответом «да» живого человека в обычном Терминале.
+# Режим Claude «без вопросов» (bypass) установщик не включает никогда. Сводки включаются только ответом «да» живого человека в обычном Терминале.
 # Если установщик запущен из Claude (переменные CLAUDECODE/CLAUDE_CODE_*/AI_AGENT или программа claude среди предков),
 # он ставит только плагины и безопасные пакеты, а оба согласия не спрашивает и не принимает, даже если есть псевдотерминал.
 set -u
 
-RELEASE_TAG="v1.0.1"
+RELEASE_TAG="v1.0.2"
 RAW_BASE="${IIRAMIS_RAW_BASE:-https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/$RELEASE_TAG/plugins/ii-ramis/scripts}"
 MARKETPLACE_SOURCE="${IIRAMIS_MARKETPLACE_SOURCE:-RamisGit-cyber/ii-ramis#$RELEASE_TAG}"
 DRY_RUN=0; SHARE=""; STUDENT_NAME=""; SKIP_THIRD=0
@@ -42,20 +42,22 @@ have() { command -v "$1" >/dev/null 2>&1; }
 
 # Запущен ли установщик из Claude (агентом), а не человеком. Два независимых признака:
 # переменные, которые Claude Code выставляет всем дочерним процессам, и программа claude среди предков процесса.
-# Вопросы про «без вопросов» и сводки задаём, только когда оба признака чистые. Обёртки с псевдотерминалом
+# Вопрос про сводки задаём, только когда оба признака чистые. Обёртки с псевдотерминалом
 # (script, expect, python pty, | bash с /dev/tty) делают вывод «терминальным», поэтому наличие tty ничего не доказывает.
 agent_context() {
   local marker
   marker="$(export -p 2>/dev/null | grep -oE '(^|[ ])(CLAUDECODE|CLAUDE_CODE_[A-Z0-9_]*|AI_AGENT)=' | head -1 | tr -d ' =')"
   if [ -n "$marker" ]; then AGENT_WHY="переменная $marker"; return 0; fi
-  local pid=$$ step=0 comm base
+  local pid=$$ step=0 comm base parent
   while [ "$step" -lt 20 ] && [ "${pid:-0}" -gt 1 ]; do
-    comm="$(/bin/ps -o comm= -p "$pid" 2>/dev/null)" || break
+    # не смогли прочитать родителей (нет ps, ошибка) — считаем, что это агент
+    comm="$(/bin/ps -o comm= -p "$pid" 2>/dev/null)" || { AGENT_WHY="не удалось проверить родительские процессы"; return 0; }
     [ -z "$comm" ] && break
     base="$(basename "$comm" 2>/dev/null | tr '[:upper:]' '[:lower:]')"
     case "$base" in claude|claude-code|"claude helper"*) AGENT_WHY="запущено из программы $base"; return 0 ;; esac
     case "$comm" in */Claude.app/*|*/claude-code/*/claude) AGENT_WHY="запущено из приложения Claude"; return 0 ;; esac
-    pid="$(/bin/ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
+    parent="$(/bin/ps -o ppid= -p "$pid" 2>/dev/null)" || { AGENT_WHY="не удалось проверить родительские процессы"; return 0; }
+    pid="$(printf '%s' "$parent" | tr -d ' ')"
     step=$((step + 1))
   done
   return 1
@@ -230,26 +232,26 @@ install_plugin ii-ramis "$MARKETPLACE_SOURCE" ii-ramis
 # ---------- 5. Настройки: маркетплейс с тега, согласие ----------
 # Автообновление НЕ включаем: обновляться на новую версию ученик будет сам (см. README).
 SETUP_ARGS=(--marketplace ii-ramis)
-[ -n "$SHARE" ] && SETUP_ARGS+=(--share "$SHARE")
-[ -n "$STUDENT_NAME" ] && SETUP_ARGS+=(--student-name "$STUDENT_NAME")
+[ "$SHARE" = "no" ] && SETUP_ARGS+=(--share no)   # «нет» безопасно откуда угодно; «да» идёт отдельным шагом ниже, прямо в терминал
 if OUT="$(setup "${SETUP_ARGS[@]}" 2>&1)"; then
   add_report done "Настройки Claude" "$(printf '%s' "$OUT" | tr '\n' ';' | cut -c1-160)"
 else
   add_report fail "Настройки Claude" "$OUT"
 fi
 
-# Режим «без вопросов»: явный вопрос с предупреждением, по умолчанию «нет». Вопрос задаёт setup-settings.mjs.
-if [ "$DRY_RUN" = 1 ]; then
-  say "  [проба] node setup-settings.mjs --ask-bypass (вопрос про режим «без вопросов», по умолчанию нет)"
-  add_report skip "Режим «без вопросов»" "(проба) будет задан вопрос, по умолчанию «нет»"
-elif [ "$INTERACTIVE" = 1 ] && [ -n "$NODE_BIN" ] && [ -n "$SETUP_JS" ]; then
-  "$NODE_BIN" "$SETUP_JS" --ask-bypass < "$ANSWER_FROM"
-  add_report done "Режим «без вопросов»" "вопрос задан, твой ответ учтён (подробности выше)"
+# Согласие «да» на сводки: setup-settings.mjs запускается без перехвата вывода, на настоящем терминале, и сам повторно
+# проверяет, что он не под Claude. Из захваченного вывода (как выше) он «да» не примет.
+if [ "$SHARE" = "yes" ] && [ "$INTERACTIVE" = 1 ] && [ -n "$NODE_BIN" ] && [ -n "$SETUP_JS" ]; then
+  SHARE_ARGS=(--share yes); [ -n "$STUDENT_NAME" ] && SHARE_ARGS+=(--student-name "$STUDENT_NAME")
+  [ "$DRY_RUN" = 1 ] && SHARE_ARGS+=(--dry-run)
+  "$NODE_BIN" "$SETUP_JS" "${SHARE_ARGS[@]}" < "$ANSWER_FROM"
+  add_report done "Отправка итогов Рамису" "согласие записано (подробности выше)"
 elif [ "$FROM_CLAUDE" = 1 ]; then
-  add_report need "Режим «без вопросов»" "не включён: установщик запущен из Claude. Включи сам, если хочешь: открой Терминал (не окно Claude) и вставь node ~/.ii-ramis/setup-settings.mjs --ask-bypass, либо тумблер в Claude Desktop: Settings -> Code. Тем же способом, отдельно, даётся согласие на отправку итогов."
-else
-  add_report need "Режим «без вопросов»" "не включён. Хочешь включить: открой Терминал и вставь node ~/.ii-ramis/setup-settings.mjs --ask-bypass (прочитаешь предупреждение и ответишь сам)"
+  add_report need "Отправка итогов Рамису" "не включена: установщик запущен из Claude. Согласие даёшь только ты сам: запусти установщик в обычном Терминале (не в окне Claude)."
 fi
+
+# Режим «без вопросов» (bypass) установщик НЕ включает вообще: только ты сам.
+add_report need "Режим «без вопросов»" "не включён и никакой скрипт его не включает. Хочешь сам: Claude Desktop -> Settings -> Code -> «Allow bypass permissions mode» (или правка settings.json, см. README)"
 
 # ---------- 6. Итог ----------
 say ""
@@ -268,6 +270,6 @@ for line in "${REPORT[@]}"; do
 done
 say ""
 say "Дальше: полностью закрой Claude и открой заново, затем напиши в чате «привет». Если что-то в списке не вышло или нужно от тебя, просто скажи об этом ИИ Рамису в чате."
-say "Режим «без вопросов» включается только твоим «да» в терминале (см. выше). Обновления плагина сами не приходят: как обновить, написано в README."
+say "Режим «без вопросов» установщик не включает: это только твой тумблер в Claude Desktop (Settings -> Code). Обновления плагина сами не приходят: как обновить, написано в README."
 [ "$FAIL" = 1 ] && exit 1
 exit 0

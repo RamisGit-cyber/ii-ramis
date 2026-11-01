@@ -22,7 +22,9 @@ expect('env стёрт, но предок claude: Claude', agentContext({}, () =
 expect('предок Claude.app: Claude', agentContext({}, () => ['/bin/zsh', '/Applications/Claude.app/Contents/Helpers/disclaimer']) !== null, true);
 expect('предок claude.exe (Windows)', agentContext({}, () => ['pwsh.exe', 'claude.exe']) !== null, true);
 expect('предок Claude Helper', agentContext({}, () => ['bash', 'Claude Helper (Renderer)']) !== null, true);
-expect('ошибка чтения предков не ломает проверку', agentContext({}, () => { throw new Error('ps не нашёлся'); }), null);
+expect('ошибка чтения предков: считаем агентом (fail closed)', agentContext({}, () => { throw new Error('ps не нашёлся'); }) !== null, true);
+expect('таймаут чтения предков: считаем агентом', agentContext({}, () => { const e = new Error('spawnSync ETIMEDOUT'); e.code = 'ETIMEDOUT'; throw e; }) !== null, true);
+expect('пустая цепочка (сирота, родитель init): человек', agentContext({}, () => []), null);
 expect('claude-notes не считается', isAgentProcessName('/usr/bin/claude-notes'), false);
 expect('Terminal не считается', isAgentProcessName('/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal'), false);
 expect('iTerm2 не считается', isAgentProcessName('/Applications/iTerm.app/Contents/MacOS/iTerm2'), false);
@@ -32,7 +34,7 @@ const blocked = [
   '127.0.0.1', '2130706433', '0x7f.1', '0177.0.0.1', '127.1', '017700000001', '0x7f000001', '0', '0.0.0.0', '10.1.2.3',
   '172.16.0.1', '172.31.255.255', '192.168.0.1', '169.254.169.254', '100.100.100.200',
   '[::1]', '[0:0:0:0:0:0:0:1]', '[::]', '[::ffff:127.0.0.1]', '[::ffff:7f00:1]', '[::ffff:169.254.169.254]', '[::ffff:a00:1]',
-  '[fe80::1]', '[febf::1]', '[fc00::1]', '[fd00:ec2::254]', '[64:ff9b::7f00:1]', '[2002:7f00:1::]',
+  '[fe80::1]', '[febf::1]', '[fc00::1]', '[fd00:ec2::254]', '[64:ff9b::7f00:1]', '[2002:7f00:1::]', '[::ffff:8.8.8.8]', '198.18.0.1', '198.19.255.255', '[64:ff9b:1::1]', '[64:ff9b:1:ffff::1]',
   'localhost', 'localhost.', 'LOCALHOST', 'a.localhost', 'metadata.google.internal', 'metadata.google.internal.', '127.0.0.1.nip.io', '%31%32%37.0.0.1', '127。0。0。1',
 ];
 for (const host of blocked) {
@@ -40,7 +42,7 @@ for (const host of blocked) {
   try { name = new URL(`http://${host}/`).hostname; } catch { name = host; }
   expect(`закрыт: ${host}`, isInternalHost(name), true);
 }
-for (const host of ['example.com', 'github.com', '8.8.8.8', '172.15.0.1', '172.32.0.1', '192.169.0.1', '[2606:4700::1111]', '11.0.0.1', '100.63.0.1']) {
+for (const host of ['example.com', 'github.com', '8.8.8.8', '172.15.0.1', '172.32.0.1', '192.169.0.1', '[2606:4700::1111]', '11.0.0.1', '100.63.0.1', '198.17.0.1', '198.20.0.1']) {
   expect(`открыт: ${host}`, isInternalHost(new URL(`http://${host}/`).hostname), false);
 }
 

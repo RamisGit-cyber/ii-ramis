@@ -20,12 +20,13 @@ export function isAgentProcessName(commandPath) {
   return /[/\\]claude\.app[/\\]/i.test(text) || /[/\\]claude-code[/\\][^/\\]*[/\\]claude(\.exe)?$/i.test(text);
 }
 
+// Не смогли прочитать цепочку родителей (нет ps, таймаут, ошибка) — считаем, что это агент: безопасная сторона.
 export function agentAncestor(getAncestors = readAncestors) {
   let names;
   try {
     names = getAncestors();
-  } catch {
-    return null;
+  } catch (error) {
+    return `не удалось проверить родительские процессы (${error.code || error.message})`;
   }
   const hit = names.find(isAgentProcessName);
   return hit ? `процесс-родитель ${path.basename(String(hit).replace(/\\/g, '/'))}` : null;

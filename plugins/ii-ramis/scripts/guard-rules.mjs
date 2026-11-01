@@ -277,13 +277,13 @@ function curlValueUploads(option, value) {
   if (option === 'variable') return value.includes('@') || value.startsWith('%'); // --variable имя@файл читает файл, %ИМЯ тянет переменную окружения
   if (/[$`]/.test(value)) return true; // содержимое подставляется на лету: $(cat файл), $(< файл)
   if (option === 'T' || option === 'upload-file') return true; // любой -T: «загрузить файл», в том числе поток из tar
-  if (option === 'data-urlencode') return /^[^=]*@/.test(value);
+  if (option === 'data-urlencode' || option === 'url-query') return /^[^=]*@/.test(value);
   if (option === 'F' || option === 'form') return /(^|=)[@<]/.test(value);
   return value.startsWith('@');
 }
 
 // Длинные ключи, значение которых curl может прочитать из файла или подставить: data*, form, upload-file, json, header, variable.
-const CURL_UPLOAD_LONG = ['data', 'data-ascii', 'data-binary', 'data-urlencode', 'form', 'upload-file', 'json', 'header', 'variable'];
+const CURL_UPLOAD_LONG = ['data', 'data-ascii', 'data-binary', 'data-urlencode', 'form', 'upload-file', 'json', 'header', 'variable', 'url-query'];
 const CURL_FILE_CONFIG_REASON_SHORT = new Set(['K']);
 
 // Ключи, которые запрещены целиком: --config/-K читает команды из файла, --expand-* подставляет {{переменные}} и файлы.
@@ -300,7 +300,7 @@ function curlUploads(args) {
       const [rawName, inlineValue] = arg.slice(2).split(/=(.*)/s);
       const name = rawName.toLowerCase();
       if (curlBannedLongOption(name)) return true;
-      const option = name.length >= 2 ? CURL_UPLOAD_LONG.find((long) => long.startsWith(name)) : undefined;
+      const option = name.length >= 2 && name !== 'url' ? CURL_UPLOAD_LONG.find((long) => long.startsWith(name)) : undefined;
       if (option && curlValueUploads(option, inlineValue ?? args[i + 1])) return true;
     } else if (/^-[A-Za-z]/.test(arg)) {
       for (let c = 1; c < arg.length; c += 1) {

@@ -36,7 +36,7 @@ function parseIPv6(text) {
 
 function isPrivateIPv4([a, b]) {
   return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || (a === 192 && b === 0) || a >= 224;
+    (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || (a === 192 && b === 0) || (a === 198 && (b === 18 || b === 19)) || a >= 224;
 }
 
 function embeddedIPv4(high, low) {
@@ -50,7 +50,9 @@ function isPrivateIPv6(groups) {
   if ((g0 & 0xffc0) === 0xfe80) return true; // fe80::/10
   if ((g0 & 0xfe00) === 0xfc00) return true; // fc00::/7, в том числе fd00:ec2::254 (метаданные AWS)
   if (g0 === 0xff00 || (g0 & 0xff00) === 0xff00) return true; // multicast
-  if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && (g5 === 0xffff || g5 === 0)) return isPrivateIPv4(embeddedIPv4(g6, g7)); // ::ffff:a.b.c.d и ::a.b.c.d
+  if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0xffff) return true; // ::ffff:0:0/96 целиком: IPv4-mapped, любой адрес
+  if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0) return isPrivateIPv4(embeddedIPv4(g6, g7)); // ::a.b.c.d
+  if (g0 === 0x64 && g1 === 0xff9b && g2 === 1) return true; // 64:ff9b:1::/48 (локальный NAT64)
   if (g0 === 0x64 && g1 === 0xff9b && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0) return isPrivateIPv4(embeddedIPv4(g6, g7)); // NAT64
   if (g0 === 0x2002) return isPrivateIPv4(embeddedIPv4(g1, g2)); // 6to4
   if (g0 === 0x2001 && g1 === 0) return true; // Teredo: адрес внутри закодирован, считаем закрытым

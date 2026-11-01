@@ -1,7 +1,7 @@
 # Установщик пакета «ИИ Рамис» для Windows (PowerShell). Идемпотентный: повторный запуск безопасен.
-# Запуск:  irm https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/v1.0.1/plugins/ii-ramis/scripts/install.ps1 | iex
-# Ставится версия с тега релиза (v1.0.1), а не с ветки main. Согласие на сводки и режим «без вопросов» (bypass)
-# включаются только ответом «да» живого человека в окне PowerShell. Если установщик запущен из Claude (переменные
+# Запуск:  irm https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/v1.0.2/plugins/ii-ramis/scripts/install.ps1 | iex
+# Ставится версия с тега релиза (v1.0.2), а не с ветки main. Режим «без вопросов» (bypass) установщик не включает никогда,
+# согласие на сводки даётся только ответом «да» живого человека в окне PowerShell. Если установщик запущен из Claude (переменные
 # CLAUDECODE/CLAUDE_CODE_*/AI_AGENT или программа claude среди предков), он ставит только плагины и безопасные пакеты.
 # Параметры при запуске файла: -DryRun  -Share yes|no  -Name "Имя"  -SkipThirdParty
 # При запуске через `| iex` параметры задаются переменными окружения: IIRAMIS_DRYRUN=1, IIRAMIS_SHARE=yes|no, IIRAMIS_NAME
@@ -17,7 +17,7 @@ if ($env:IIRAMIS_DRYRUN -eq '1') { $DryRun = $true }
 if (-not $Share -and $env:IIRAMIS_SHARE) { $Share = $env:IIRAMIS_SHARE }
 if (-not $Name -and $env:IIRAMIS_NAME) { $Name = $env:IIRAMIS_NAME }
 
-$ReleaseTag = 'v1.0.1'
+$ReleaseTag = 'v1.0.2'
 $RawBase = if ($env:IIRAMIS_RAW_BASE) { $env:IIRAMIS_RAW_BASE } else { "https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/$ReleaseTag/plugins/ii-ramis/scripts" }
 $MarketplaceSource = if ($env:IIRAMIS_MARKETPLACE_SOURCE) { $env:IIRAMIS_MARKETPLACE_SOURCE } else { "RamisGit-cyber/ii-ramis#$ReleaseTag" }
 # Запущен ли установщик из Claude (агентом), а не человеком. Два независимых признака: переменные, которые Claude Code
@@ -34,7 +34,7 @@ function Get-AgentReason {
       if ($proc.ProcessId -ne $PID -and ($proc.Name -match '^(claude|claude-code)(\.exe)?$' -or $proc.ExecutablePath -match '\\claude\.exe$|\\Claude\\')) { return "запущено из программы $($proc.Name)" }
       $current = $proc.ParentProcessId
     }
-  } catch { }
+  } catch { return "не удалось проверить родительские процессы" }
   return $null
 }
 $AgentReason = Get-AgentReason
@@ -193,24 +193,24 @@ Install-Plugin 'ii-ramis' $MarketplaceSource 'ii-ramis'
 # ---------- 5. Настройки: маркетплейс с тега, согласие ----------
 # Автообновление НЕ включаем: обновляться на новую версию ученик будет сам (см. README).
 $setupArgs = @('--marketplace', 'ii-ramis')
-if ($Share) { $setupArgs += @('--share', $Share) }
-if ($Name) { $setupArgs += @('--student-name', $Name) }
+if ($Share -eq 'no') { $setupArgs += @('--share', 'no') }   # «нет» безопасно откуда угодно; «да» идёт отдельным шагом ниже, прямо в окно
 $settingsResult = Invoke-Setup $setupArgs
 if ($settingsResult.Ok) { Add-Report 'done' 'Настройки Claude' $settingsResult.Output }
 else { Add-Report 'fail' 'Настройки Claude' $settingsResult.Output }
 
-# Режим «без вопросов»: явный вопрос с предупреждением, по умолчанию «нет». Вопрос задаёт setup-settings.mjs.
-if ($DryRun) {
-  Write-Host '  [проба] node setup-settings.mjs --ask-bypass (вопрос про режим «без вопросов», по умолчанию нет)'
-  Add-Report 'skip' 'Режим «без вопросов»' 'будет задан вопрос, по умолчанию «нет»'
-} elseif ($Interactive -and $NodeAvailable -and $SetupJs) {
-  & node $SetupJs '--ask-bypass'
-  Add-Report 'done' 'Режим «без вопросов»' 'вопрос задан, твой ответ учтён (подробности выше)'
+# Согласие «да» на сводки: setup-settings.mjs запускается без перехвата вывода и сам повторно проверяет, что он не под Claude.
+if ($Share -eq 'yes' -and $Interactive -and $NodeAvailable -and $SetupJs) {
+  $shareArgs = @('--share', 'yes')
+  if ($Name) { $shareArgs += @('--student-name', $Name) }
+  if ($DryRun) { $shareArgs += '--dry-run' }
+  & node $SetupJs @shareArgs
+  Add-Report 'done' 'Отправка итогов Рамису' 'согласие записано (подробности выше)'
 } elseif ($AgentReason) {
-  Add-Report 'need' 'Режим «без вопросов»' 'не включён: установщик запущен из Claude. Включи сам, если хочешь: открой PowerShell (не окно Claude) и вставь node $env:USERPROFILE\.ii-ramis\setup-settings.mjs --ask-bypass, либо тумблер в Claude Desktop: Settings -> Code. Тем же способом, отдельно, даётся согласие на отправку итогов.'
-} else {
-  Add-Report 'need' 'Режим «без вопросов»' 'не включён. Хочешь включить: открой PowerShell и вставь node $env:USERPROFILE\.ii-ramis\setup-settings.mjs --ask-bypass (прочитаешь предупреждение и ответишь сам)'
+  Add-Report 'need' 'Отправка итогов Рамису' 'не включена: установщик запущен из Claude. Согласие даёшь только ты сам: запусти установщик в обычном окне PowerShell (не в окне Claude).'
 }
+
+# Режим «без вопросов» (bypass) установщик НЕ включает вообще: только ты сам.
+Add-Report 'need' 'Режим «без вопросов»' 'не включён и никакой скрипт его не включает. Хочешь сам: Claude Desktop -> Settings -> Code -> «Allow bypass permissions mode» (или правка settings.json, см. README)'
 
 # ---------- 6. Итог ----------
 Write-Host ''
@@ -228,5 +228,5 @@ foreach ($item in $Report) {
 }
 Write-Host ''
 Write-Host 'Дальше: полностью закрой Claude (и в трее) и открой заново, затем напиши в чате «привет». Если что-то не вышло, скажи об этом ИИ Рамису в чате.'
-Write-Host 'Режим «без вопросов» включается только твоим «да» в окне PowerShell (см. выше). Обновления плагина сами не приходят: как обновить, написано в README.'
+Write-Host 'Режим «без вопросов» установщик не включает: это только твой тумблер в Claude Desktop (Settings -> Code). Обновления плагина сами не приходят: как обновить, написано в README.'
 if ($hasFail) { exit 1 }
