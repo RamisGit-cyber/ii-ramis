@@ -1,5 +1,5 @@
-// Тесты agent-context.mjs и host-rules.mjs без запуска настоящих процессов. Запуск: node tests/test-agent-context.mjs
-import { agentContext, agentEnvMarker, isAgentProcessName } from '../plugins/ii-ramis/scripts/agent-context.mjs';
+// Тесты host-rules.mjs (внутренние адреса для WebFetch). Запуск: node tests/test-agent-context.mjs
+// Имя файла историческое: проверка родительских процессов claude убрана в v1.0.3 вместе с согласием «только из терминала».
 import { isInternalHost } from '../plugins/ii-ramis/scripts/host-rules.mjs';
 
 let failed = 0;
@@ -8,26 +8,6 @@ function expect(label, actual, wanted) {
   if (!same) failed += 1;
   console.log(`  ${same ? 'ok  ' : 'FAIL'} ${label}${same ? '' : ` (ждали ${JSON.stringify(wanted)}, получили ${JSON.stringify(actual)})`}`);
 }
-
-const nobody = () => ['/bin/zsh', '/usr/bin/login', '/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal'];
-expect('чистое окружение и родители: человек', agentContext({ PATH: '/bin', HOME: '/h' }, nobody), null);
-expect('CLAUDECODE=1: Claude', agentContext({ CLAUDECODE: '1' }, nobody) !== null, true);
-expect('CLAUDE_CODE_ENTRYPOINT: Claude', agentContext({ CLAUDE_CODE_ENTRYPOINT: 'cli' }, nobody) !== null, true);
-expect('любая CLAUDE_CODE_*: Claude', agentContext({ CLAUDE_CODE_SESSION_ID: 'x' }, nobody) !== null, true);
-expect('AI_AGENT: Claude', agentContext({ AI_AGENT: 'claude-code_2' }, nobody) !== null, true);
-expect('пустая переменная не считается', agentEnvMarker({ CLAUDECODE: '' }), null);
-expect('CLAUDE_CONFIG_DIR сам по себе не признак', agentEnvMarker({ CLAUDE_CONFIG_DIR: '/c' }), null);
-expect('CLAUDE_PLUGIN_ROOT не признак', agentEnvMarker({ CLAUDE_PLUGIN_ROOT: '/p' }), null);
-expect('env стёрт, но предок claude: Claude', agentContext({}, () => ['/bin/bash', '/Users/x/Library/Application Support/Claude/claude-code/2.1.0/claude']) !== null, true);
-expect('предок Claude.app: Claude', agentContext({}, () => ['/bin/zsh', '/Applications/Claude.app/Contents/Helpers/disclaimer']) !== null, true);
-expect('предок claude.exe (Windows)', agentContext({}, () => ['pwsh.exe', 'claude.exe']) !== null, true);
-expect('предок Claude Helper', agentContext({}, () => ['bash', 'Claude Helper (Renderer)']) !== null, true);
-expect('ошибка чтения предков: считаем агентом (fail closed)', agentContext({}, () => { throw new Error('ps не нашёлся'); }) !== null, true);
-expect('таймаут чтения предков: считаем агентом', agentContext({}, () => { const e = new Error('spawnSync ETIMEDOUT'); e.code = 'ETIMEDOUT'; throw e; }) !== null, true);
-expect('пустая цепочка (сирота, родитель init): человек', agentContext({}, () => []), null);
-expect('claude-notes не считается', isAgentProcessName('/usr/bin/claude-notes'), false);
-expect('Terminal не считается', isAgentProcessName('/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal'), false);
-expect('iTerm2 не считается', isAgentProcessName('/Applications/iTerm.app/Contents/MacOS/iTerm2'), false);
 
 console.log('== host-rules: внутренние адреса ==');
 const blocked = [

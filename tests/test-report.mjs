@@ -178,6 +178,42 @@ for (const status of [429, 503]) {
   hang.server.close();
 }
 
+// 7а. пересказ сессии (recap): чистится redact, ≤ 400 символов, только по согласию, файл удаляется
+{
+  const dirty = 'Ученик делал лендинг, урок 4. Писал на aibek@example.com, звонил +996 555 123 456, ключ sk-abcdefghijklmnop123456, папка /Users/aibek/site/src. Застрял на деплое. ' + 'Долгий хвост. '.repeat(60);
+  const { server, received, url } = await startServer(ok);
+  const home = tempHome(); setConfig(home, { share: true, student_name: 'Тест' });
+  fs.writeFileSync(path.join(home, 'recap.txt'), dirty);
+  await runSessionEnd(home, url, writeTranscript(home));
+  const row = JSON.parse(received[0].body);
+  check('recap уходит строкой ≤ 400 символов', typeof row.recap === 'string' && row.recap.length > 20 && row.recap.length <= 400);
+  check('recap сохраняет смысл и короткие числа («урок 4»)', row.recap.includes('лендинг') && row.recap.includes('урок 4'));
+  for (const leak of ['aibek@example.com', '555 123 456', '996', 'sk-abcdef', '/Users/aibek']) {
+    check(`в recap нет «${leak}»`, !row.recap.includes(leak));
+  }
+  check('файл recap.txt удалён после сессии', !fs.existsSync(path.join(home, 'recap.txt')));
+  check('с recap добавлено только поле recap', Object.keys(row).sort().join() === 'errors,install_id,lesson,os,recap,stuck,student,summary');
+  server.close();
+}
+{
+  const { server, received, url } = await startServer(ok);
+  const home = tempHome(); setConfig(home, { share: false });
+  fs.writeFileSync(path.join(home, 'recap.txt'), 'Ученик делал сайт');
+  await runSessionEnd(home, url, writeTranscript(home));
+  check('без согласия recap не сохраняется даже локально', !progressLines(home)[0].includes('Ученик делал сайт') && received.length === 0);
+  check('без согласия файл recap.txt всё равно удалён', !fs.existsSync(path.join(home, 'recap.txt')));
+  server.close();
+}
+{
+  // в базе ещё нет колонки recap (миграция не применена): сервер отвечает 400, запись не теряется
+  const picky = await startServer((req, res) => { res.statusCode = JSON.parse(picky.received.at(-1).body).recap !== undefined ? 400 : 201; res.end(); });
+  const home = tempHome(); setConfig(home, { share: true, student_name: 'Тест' });
+  fs.writeFileSync(path.join(home, 'recap.txt'), 'Ученик делал сайт');
+  await runSessionEnd(home, picky.url, writeTranscript(home));
+  check('400 из-за recap: повтор без recap, запись дошла', picky.received.length === 2 && !('recap' in JSON.parse(picky.received[1].body)) && sentLines(home) === 1);
+  picky.server.close();
+}
+
 // 8. install_id создаётся при установке и хранится в config.json
 {
   const home = tempHome();
