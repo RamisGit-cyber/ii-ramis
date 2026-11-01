@@ -8,6 +8,9 @@ export const DATA_DIR = process.env.IIRAMIS_HOME || path.join(os.homedir(), '.ii
 export const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 export const PROGRESS_FILE = path.join(DATA_DIR, 'progress.jsonl');
 export const STATE_FILE = path.join(DATA_DIR, 'state.json');
+// Короткий пересказ текущей сессии: пишет ИИ Рамис, session-end чистит, прогоняет через redact и отправляет (если ученик согласился).
+export const RECAP_FILE = path.join(DATA_DIR, 'recap.txt');
+export const RECAP_MAX_CHARS = 400;
 // Старый механизм «да» через модель удалён (модель могла подтвердить сама себя). Файл только вычищаем.
 export const LEGACY_APPROVALS_FILE = path.join(DATA_DIR, 'approvals.json');
 
@@ -172,8 +175,12 @@ const HOME_PATH = /\/(?:Users|home|Volumes|mnt|root|private|var|tmp|opt)(?=\/)[^
 const TILDE_PATH = /~[/\\][^\n'"`:;()<>|*?]*/gu;
 const ABSOLUTE_PATH = new RegExp(String.raw`(?<!${NAME_CHARS})(?:/${NAME_CHARS}+){2,}`, 'gu');
 const RELATIVE_PATH = new RegExp(String.raw`(?:${NAME_CHARS}+[/\\]){2,}${NAME_CHARS}+`, 'gu');
-export function redact(text, maxLength = 100) {
-  return String(text)
+// Телефон: цифры с пробелами, скобками, дефисами (от 7 символов подряд). Для пересказа сессии это отдельный шаг.
+const PHONE_LIKE = /\+?\d[\d\s().-]{5,}\d/g;
+// Режим пересказа (summary): короткие числа («урок 4») остаются, телефоны и длинные числа вычищаются.
+export function redact(text, maxLength = 100, { summary = false } = {}) {
+  const prepared = summary ? String(text).replace(PHONE_LIKE, '<phone>') : String(text);
+  return prepared
     .replace(SECRET_VALUE, '<secret>')
     .replace(/\bBearer\s+\S+/gi, '<secret>')
     .replace(WINDOWS_PATH, '<path>')
@@ -185,7 +192,7 @@ export function redact(text, maxLength = 100) {
     .replace(/[\p{L}\p{N}._+-]+@[\p{L}\p{N}-]+\.[\p{L}\p{N}.-]+/gu, '<email>')
     .replace(/\b(sk|pk|ghp|gho|xox[a-z]|eyJ)[\w-]{8,}/g, '<key>')
     .replace(/\b[A-Za-z0-9_-]{24,}\b/g, '<token>')
-    .replace(/\d+/g, 'N')
+    .replace(summary ? /\d{5,}/g : /\d+/g, 'N')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, maxLength);

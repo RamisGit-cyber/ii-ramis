@@ -5,7 +5,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
-  STATE_FILE, LEGACY_APPROVALS_FILE, loadConfig, readJson, writeJson, readStdinJson, mentionsSecretPath,
+  STATE_FILE, RECAP_FILE, RECAP_MAX_CHARS, LEGACY_APPROVALS_FILE, loadConfig, readJson, writeJson, readStdinJson, mentionsSecretPath,
 } from './lib.mjs';
 
 const CONFIG_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'config.mjs');
@@ -94,11 +94,35 @@ function removeLegacyApprovals() {
   }
 }
 
+// Пересказ каждой сессии начинается с чистого листа: старый текст не должен уйти под новой сессией.
+function clearRecap() {
+  try {
+    fs.rmSync(RECAP_FILE, { force: true });
+  } catch (error) {
+    console.error(`ii-ramis session-start: не удалил старый пересказ: ${error.message}`);
+  }
+}
+
+function consentNotes(config) {
+  const notes = [];
+  if (config.share_asked !== true) {
+    notes.push('Согласие на пересказы (один раз за всё время, после вопроса про урок): спроси простыми словами «Можно отправлять Рамису короткий пересказ твоих занятий (без кода и паролей), чтобы он видел, где тебе помочь? да/нет». ' +
+      'Включай отправку (node "' + CONFIG_SCRIPT + '" set share true) ТОЛЬКО после явного «да» ученика в его отдельном сообщении; на «нет», «не знаю», «потом» и молчание ставь set share false. После любого ответа выполни set share_asked true. ' +
+      'Не уговаривай и не включай сам. Если сказал «да», спроси, как подписывать пересказ (имя или ник), и запиши: set student_name "Имя".');
+  }
+  if (config.share === true) {
+    notes.push(`Ученик согласился на пересказы. Ведёшь пересказ сессии: файл ${RECAP_FILE} (создай инструментом Write, перезаписывай целиком). Текст: 2–3 предложения по-русски, до ${RECAP_MAX_CHARS} символов, что делал ученик, где застрял, о чём спрашивал. ` +
+      'Без дословных сообщений, кода, путей, ключей, паролей, почт и телефонов. Обновляй после каждого заметного этапа и обязательно перед прощанием: хук отправит файл сам в конце сессии.');
+  }
+  return notes;
+}
+
 function main() {
   const input = readStdinJson();
   const cwd = input.cwd || process.cwd();
   const config = loadConfig();
   removeLegacyApprovals();
+  clearRecap();
   const state = readJson(STATE_FILE, {});
   const notes = [];
 
@@ -113,6 +137,8 @@ function main() {
       : 'Папка выглядит как проект, но Git на этом маке ещё не установлен (нужны инструменты разработчика Apple). Объясни ученику простыми словами, зачем это, и помоги поставить.');
   }
 
+  notes.push(...consentNotes(config));
+
   const now = Date.now();
   if (!state.lastCheck || now - state.lastCheck > CHECK_INTERVAL_MS) {
     const missing = toolsMissing();
@@ -122,8 +148,14 @@ function main() {
     writeJson(STATE_FILE, { ...state, lastCheck: now, lastMissing: missing });
   }
 
+  const needsCheck = config.checked !== true;
+  const checkTail = needsCheck
+    ? ' Потом, в этой же сессии, САМ запусти проверку компьютера: навык /ii-ramis:proverka (ученика просить не надо, это часть знакомства). Проверка уже была и нашла проблемы, либо её ещё не было.'
+    : '';
   if (config.lesson === null || config.lesson === undefined) {
-    notes.push('Это первая сессия с ИИ Рамисом: коротко представься, честно скажи, что ты ИИ-помощник Рамиса, и спроси, какой урок курса ученик уже прошёл. Ответ запиши: node "' + CONFIG_SCRIPT + '" set lesson N.');
+    notes.push('Это первая сессия с ИИ Рамисом: коротко представься, честно скажи, что ты ИИ-помощник Рамиса, и спроси, какой урок курса ученик уже прошёл. Ответ запиши: node "' + CONFIG_SCRIPT + '" set lesson N.' + checkTail);
+  } else if (needsCheck) {
+    notes.push('Проверка компьютера ещё не проходила чисто (первый раз или прошлая нашла проблемы). В начале сессии, сразу после приветствия, САМ запусти навык /ii-ramis:proverka без просьбы ученика. Когда проверка пройдёт без пунктов [нет], она запишет checked=true, и больше в каждой сессии её навязывать не надо.');
   }
 
   if (notes.length === 0) return;

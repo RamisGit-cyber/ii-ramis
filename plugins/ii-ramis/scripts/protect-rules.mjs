@@ -21,7 +21,8 @@ const PROTECTED_PATTERNS = [
 const PROTECTED_DIRS = [
   PLUGIN_ROOT, path.join(HOME, '.claude', 'plugins'), path.join(HOME, '.claude', 'hooks'), DATA_DIR, path.join(HOME, '.ii-ramis'),
 ];
-const HOOK_WRITTEN_FILES = [DATA_DIR, path.join(HOME, '.ii-ramis')].flatMap((dir) => [path.join(dir, 'state.json'), path.join(dir, 'progress.jsonl')]);
+// recap.txt: короткий пересказ сессии, его пишет ИИ Рамис (Write), а хук session-end чистит и отправляет.
+const HOOK_WRITTEN_FILES = [DATA_DIR, path.join(HOME, '.ii-ramis')].flatMap((dir) => [path.join(dir, 'state.json'), path.join(dir, 'progress.jsonl'), path.join(dir, 'recap.txt')]);
 const PROTECTED_FILES = [
   path.join(HOME, '.claude.json'), path.join(DATA_DIR, 'config.json'), path.join(HOME, '.ii-ramis', 'config.json'),
   path.join(HOME, '.claude', 'settings.json'), path.join(HOME, '.claude', 'settings.local.json'),
@@ -122,7 +123,10 @@ function resolvesToScript(token, names, cwd) {
 function isConfigSet(args) {
   return args.length === 3 && args[0] === 'set' && (
     (args[1] === 'lesson' && /^\d{1,2}$/.test(args[2])) || (args[1] === 'autosave' && /^(true|false)$/.test(args[2])) ||
-    (args[1] === 'share' && args[2] === 'false')); // выключить отправку можно через чат, включить — только установщиком или руками
+    (args[1] === 'checked' && /^(true|false)$/.test(args[2])) ||
+    // согласие на пересказы даёт ученик в чате; что он написал «да» явным сообщением, проверяет consent-rules.mjs
+    (args[1] === 'share' && /^(true|false)$/.test(args[2])) || (args[1] === 'share_asked' && args[2] === 'true') ||
+    (args[1] === 'student_name' && /^[\p{L}\p{N} ._-]{1,40}$/u.test(args[2])));
 }
 
 function isPluginCommand(tokens) {

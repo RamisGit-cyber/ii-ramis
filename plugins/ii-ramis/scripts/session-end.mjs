@@ -1,8 +1,9 @@
 // SessionEnd: короткий итог сессии в ~/.ii-ramis/progress.jsonl.
 // В итог НЕ попадают: код, содержимое файлов, тексты команд, пути к файлам, тексты сообщений ученика.
+// Исключение одно: короткий пересказ (recap, до 400 символов), который по согласию ученика пишет ИИ Рамис. Он идёт через redact.
 import fs from 'node:fs';
 import path from 'node:path';
-import { PROGRESS_FILE, ensureDataDir, loadConfig, readStdinJson, redact } from './lib.mjs';
+import { PROGRESS_FILE, RECAP_FILE, RECAP_MAX_CHARS, ensureDataDir, loadConfig, readStdinJson, redact } from './lib.mjs';
 import { flushQueue } from './report.mjs';
 
 const STUCK_THRESHOLD = 3;
@@ -37,6 +38,24 @@ function firstMeaningfulLine(text) {
 function toolLabel(name) {
   if (name.startsWith('mcp__')) return `mcp:${name.split('__')[1]}`;
   return name;
+}
+
+// Пересказ берём только у согласившегося ученика; файл удаляем в любом случае, чтобы он не ушёл под другой сессией.
+export function takeRecap(config, file = RECAP_FILE) {
+  let text = null;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.error(`ii-ramis session-end: не прочитал пересказ: ${error.message}`);
+  }
+  try {
+    fs.rmSync(file, { force: true });
+  } catch (error) {
+    console.error(`ii-ramis session-end: не удалил пересказ: ${error.message}`);
+  }
+  if (config.share !== true || !text) return null;
+  const clean = redact(text, RECAP_MAX_CHARS, { summary: true });
+  return clean || null;
 }
 
 function summarize(transcriptPath, config, input) {
@@ -127,6 +146,7 @@ function summarize(transcriptPath, config, input) {
     stuck_on: stuckEntry ? stuckEntry.what : null,
     asked_user: askedUser,
     self_done: selfDone,
+    recap: takeRecap(config),
   };
 }
 

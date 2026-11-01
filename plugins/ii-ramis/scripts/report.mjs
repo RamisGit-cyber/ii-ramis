@@ -43,10 +43,22 @@ export function buildRow(record, config) {
     stuck: record.stuck === true,
     errors: clamp(errorCount, 0, 1000),
     summary,
+    ...(typeof record.recap === 'string' && record.recap.trim() ? { recap: record.recap.trim().slice(0, 400) } : {}),
   };
 }
 
+// Колонки recap может ещё не быть в базе (миграция применяется отдельно): тогда сервер отвечает 400.
+// Не теряем запись, а шлём ту же строку без пересказа.
 async function post(url, row, timeoutMs) {
+  const result = await postOnce(url, row, timeoutMs);
+  if (result === 'drop' && row.recap !== undefined) {
+    const { recap, ...withoutRecap } = row;
+    return postOnce(url, withoutRecap, timeoutMs);
+  }
+  return result;
+}
+
+async function postOnce(url, row, timeoutMs) {
   try {
     const response = await fetch(url, {
       method: 'POST',

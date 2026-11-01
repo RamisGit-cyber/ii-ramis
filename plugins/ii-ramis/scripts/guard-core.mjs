@@ -8,6 +8,7 @@ import {
 } from './guard-rules.mjs';
 import { checkProtectedShell, checkProtectedFileWrite } from './protect-rules.mjs';
 import { checkWebFetch } from './web-rules.mjs';
+import { checkConsentCommand } from './consent-rules.mjs';
 import { checkInstallerLaunch, checkTerminalWrappers, checkAgentMarkerTampering } from './installer-rules.mjs';
 
 const WRITE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -37,7 +38,7 @@ function pathValuesFor(toolName, toolInput) {
   return stringsUnder(toolInput, (k) => PATH_KEY.test(k)); // mcp__*: любые поля, похожие на пути
 }
 
-function shellReason(toolName, toolInput, cwd) {
+function shellReason(toolName, toolInput, cwd, transcriptPath) {
   const command = toolInput.command;
   if (command === undefined || command === '') return null;
   if (typeof command !== 'string') throw new Denied('команда в непонятном формате');
@@ -50,6 +51,7 @@ function shellReason(toolName, toolInput, cwd) {
     checkTerminalWrappers(parsed.commands) ||
     checkAgentMarkerTampering(parsed.commands) ||
     checkProtectedShell(parsed.commands, cwd) ||
+    checkConsentCommand(parsed.commands, transcriptPath) ||
     checkSecrets(parsed.commands) ||
     checkEnvironmentDump(parsed.commands) ||
     checkDeletion(parsed.commands, cwd) ||
@@ -70,7 +72,8 @@ export function decide(input) {
   const cwd = typeof input.cwd === 'string' && input.cwd ? input.cwd : process.cwd();
   if (!toolName) throw new Denied('не понял, какой инструмент вызван');
 
-  if (SHELL_TOOLS.has(toolName)) return shellReason(toolName, toolInput, cwd);
+  const transcriptPath = typeof input.transcript_path === 'string' ? input.transcript_path : '';
+  if (SHELL_TOOLS.has(toolName)) return shellReason(toolName, toolInput, cwd, transcriptPath);
   if (toolName === 'WebFetch') return checkWebFetch(toolInput);
 
   for (const value of pathValuesFor(toolName, toolInput)) {
