@@ -83,7 +83,7 @@ const SECRET_PATTERNS = [
   String.raw`\.docker[/\\]config\.json|\.kube[/\\]config|gh[/\\]hosts\.yml|\.config[/\\]gcloud`,
   String.raw`credentials\.json|service[-_]?account[\w.-]*\.json|secrets?\.(?:json|ya?ml|txt)`,
   String.raw`/proc/[\w/]*environ`,
-  String.raw`\.ii-ramis[/\\]consent\.json`, // хеш одноразового кода согласия: Claude и автосохранение его не читают
+  String.raw`\.ii-ramis[/\\]consent\.json`, // хеш одноразового кода согласия (перебирается, поэтому файл закрыт для чтения целиком)
 ];
 const SECRET_PATH = new RegExp(SECRET_PATTERNS.join('|'), 'i');
 // Публичный ключ (.pub) показывать можно: он нужен для GitHub.

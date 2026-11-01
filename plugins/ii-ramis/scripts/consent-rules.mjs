@@ -22,7 +22,10 @@ const NESTED_REASON = 'вложенный запуск claude из команд�
 
 export const newSalt = () => crypto.randomBytes(16).toString('hex');
 export const newCode = () => String(crypto.randomInt(1000, 10000));
-// В consent.json лежит только хеш (код + сессия): утечка файла код не раскрывает.
+// В consent.json лежит хеш (соль + сессия + код). Это НЕ защита от утечки: 4 цифры подбираются перебором за доли секунды.
+// Защищают другое: файл закрыт для чтения Claude (SECRET_PATTERNS в lib.mjs), а согласие засчитывается только из
+// настоящего сообщения ученика (input.prompt) в той же сессии. Зная код, модель может лишь попросить ученика его набрать —
+// это уже осознанный ответ человека на вопрос, который хук показал ему сам. Хеш только убирает код из файла открытым текстом.
 export const codeHash = (code, session, salt = '') => crypto.createHash('sha256').update(`${salt}:${session}:${code}`).digest('hex');
 export const buildQuestion = (code) => `${CONSENT_QUESTION} Если согласен, ответь: да ${code}. Если не хочешь, ответь: нет ${code}.`;
 
