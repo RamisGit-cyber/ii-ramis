@@ -5,12 +5,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import readline from 'node:readline/promises';
+
+// Версия, с которой ставится плагин: тег релиза, а не ветка main. Обновление на новую версию делается вручную (см. README).
+export const RELEASE_TAG = 'v1.0.0';
 
 const KNOWN_MARKETPLACES = {
   'claude-plugins-official': { source: 'github', repo: 'anthropics/claude-plugins-official' },
   thedotmack: { source: 'github', repo: 'thedotmack/claude-mem' },
   ecc: { source: 'github', repo: 'affaan-m/ECC' },
-  'ii-ramis': { source: 'github', repo: 'RamisGit-cyber/ii-ramis' },
+  'ii-ramis': { source: 'github', repo: 'RamisGit-cyber/ii-ramis', ref: RELEASE_TAG },
 };
 
 const KNOWN_MCP = {
@@ -22,6 +26,7 @@ const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
 const values = (flag) => args.flatMap((a, i) => (a === flag && args[i + 1] ? [args[i + 1]] : []));
 const log = [];
+let bypassAccepted = false;
 
 const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const settingsFile = path.join(claudeDir, 'settings.json');
@@ -56,19 +61,64 @@ function marketplaceSource(name) {
   return KNOWN_MARKETPLACES[name];
 }
 
+const BYPASS_WARNING = `
+Режим «без вопросов» (bypass)
+
+Сейчас Claude перед действиями спрашивает у тебя разрешение. В режиме «без вопросов» он будет САМ
+выполнять команды на твоём компьютере: создавать, менять и удалять файлы, ставить программы, ходить
+в интернет. Заранее он тебя не спросит.
+
+Чем ты рискуешь: если Claude ошибётся или прочитает вредную инструкцию, спрятанную на чужом сайте
+или в чужом файле, он может испортить или стереть твои файлы или отправить что-то в интернет.
+
+Плагин ИИ Рамис ловит самое опасное (удаление вне проекта, ключи и пароли, выгрузку файлов, скрипты
+из интернета). Но это СТРАХОВОЧНАЯ СЕТКА, а не стена: часть обходных путей она пропускает
+(что именно, написано в README, раздел «Чего страховка не ловит»). Если на компьютере есть важные
+личные файлы без копии, не включай этот режим или сначала сделай копию.
+
+Как выключить потом: открой файл ${path.join(claudeDirDisplay(), 'settings.json')}
+и в разделе "permissions" поменяй "defaultMode" на "default" (или удали эту строку).
+Через чат с Claude это не делается: защита нарочно блокирует правку настроек.
+`;
+
+function claudeDirDisplay() {
+  return process.platform === 'win32' ? '%USERPROFILE%\\.claude' : '~/.claude';
+}
+
+const BYPASS_MANUAL_STEPS = `Режим «без вопросов» НЕ включён: установщик запущен не из обычного окна терминала, а согласие должен дать ты сам.
+Чтобы включить, открой ${process.platform === 'win32' ? 'PowerShell' : 'приложение Терминал'} и вставь:
+  node ${process.platform === 'win32' ? '$env:USERPROFILE\\.ii-ramis' : '~/.ii-ramis'}${process.platform === 'win32' ? '\\' : '/'}setup-settings.mjs --ask-bypass
+Либо вручную: в ${path.join(claudeDirDisplay(), 'settings.json')} добавь "permissions": { "defaultMode": "bypassPermissions" }.
+Можно и не включать: Claude будет спрашивать разрешения, всё остальное работает.`;
+
+// Вопрос задаём только живому человеку в терминале (и ввод, и вывод — терминал). По умолчанию «нет».
+async function askBypass() {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    log.push(BYPASS_MANUAL_STEPS);
+    return;
+  }
+  console.log(BYPASS_WARNING);
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = (await rl.question('Включить режим «без вопросов»? Напиши «да», чтобы включить. Любой другой ответ или пустая строка = нет: ')).trim().toLowerCase();
+    bypassAccepted = ['да', 'д', 'yes', 'y'].includes(answer);
+    if (!bypassAccepted) log.push('режим «без вопросов» не включён (ответ «нет»): Claude будет спрашивать разрешения');
+  } finally {
+    rl.close();
+  }
+}
+
 function updateSettings() {
   const before = readJson(settingsFile);
   const settings = structuredClone(before);
 
-  if (args.includes('--bypass')) {
+  if (bypassAccepted) {
     settings.permissions = { ...(settings.permissions || {}) };
     if (settings.permissions.defaultMode !== 'bypassPermissions') {
       settings.permissions.defaultMode = 'bypassPermissions';
-      log.push('режим bypassPermissions включён по умолчанию');
+      log.push('режим bypassPermissions («без вопросов») включён по твоему «да»');
     }
-    if (settings.skipDangerousModePermissionPrompt !== true) {
-      settings.skipDangerousModePermissionPrompt = true;
-    }
+    // skipDangerousModePermissionPrompt намеренно не ставим: Claude сам один раз покажет свой экран подтверждения.
   }
 
   settings.extraKnownMarketplaces = { ...(settings.extraKnownMarketplaces || {}) };
@@ -137,6 +187,8 @@ function updateConfig() {
 }
 
 try {
+  if (args.includes('--ask-bypass') && !dryRun) await askBypass();
+  else if (args.includes('--ask-bypass')) log.push('режим «без вопросов»: в пробе вопрос не задаётся');
   updateSettings();
   updateMcp();
   updateConfig();

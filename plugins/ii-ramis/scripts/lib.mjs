@@ -86,6 +86,32 @@ export function mentionsSecretPath(text) {
 const SECRET_DOTFILES = ['.env', '.env.local', '.env.production', '.dev.vars', '.npmrc', '.netrc', '.pgpass', '.git-credentials'];
 const SECRET_NAMES = ['server.pem', 'private.key', 'id_rsa', 'id_ed25519', 'credentials.json', 'secrets.json', 'service-account.json'];
 
+// Файлы запуска оболочки и истории команд: в них прячут автозапуск и подсматривают чужие команды и пароли.
+// Читать и писать их через Claude нельзя. Отдельный список: автосохранение (session-start) на него не смотрит.
+const STARTUP_PATTERN = new RegExp(
+  START + String.raw`\.(?:z(?:sh[\w.-]*|profile|login|logout|env)|bash[\w.-]*|profile|[\w-]*_history|viminfo|lesshst)` + END + '|' +
+  String.raw`fish[/\\](?:config\.fish|fish_history)|\.local[/\\]share[/\\]fish|` +
+  String.raw`(?:Microsoft\.)?PowerShell_profile\.ps1|ConsoleHost_history\.txt|PSReadLine`,
+  'i',
+);
+const STARTUP_DOTFILES = [
+  '.zshrc', '.zsh_history', '.zprofile', '.zshenv', '.zlogin', '.bashrc', '.bash_profile', '.bash_history', '.bash_login',
+  '.profile', '.python_history', '.node_repl_history', '.psql_history',
+];
+
+export function tokenMentionsShellStartup(token) {
+  try {
+    return expandBraces(token).some((variant) => {
+      const plain = variant.replace(/['"]/g, '');
+      if (STARTUP_PATTERN.test(' ' + variant + ' ') || STARTUP_PATTERN.test(' ' + plain + ' ')) return true;
+      const name = plain.split(/[/\\]/).pop();
+      return name.startsWith('.') && /[*?[]/.test(name) && STARTUP_DOTFILES.some((file) => globToRegex(name).test(file));
+    });
+  } catch {
+    return true; // не смогли разобрать: считаем подозрительным
+  }
+}
+
 export function expandBraces(token, budget = 50) {
   const match = String(token).match(/^(.*?)\{([^{}]*)\}(.*)$/s);
   if (!match || !match[2].includes(',')) return [String(token)];
@@ -133,11 +159,30 @@ export function tokenMentionsSecret(token) {
 }
 
 // Убираем из текста всё, что похоже на путь, ключ или почту: в отчёт это не должно попасть.
+// Буквы любых алфавитов (\p{L}, флаг u) и пробелы внутри путей: «/Users/айбек/Проекты» и «C:\Users\Айбек Сапаров\...» тоже уходят.
+// Лишнее лучше вычистить, чем оставить: путь с пробелами съедает хвост до кавычки или двоеточия.
+const NAME_CHARS = String.raw`[\p{L}\p{N}_.@+~-]`;
+const SECRET_VALUE = new RegExp(
+  String.raw`(?<![\p{L}\p{N}_])(?:api[_-]?key|apikey|access[_-]?key|secret|token|password|passwd|pwd|authorization|key|пароль|ключ|токен|секрет)(?![\p{L}\p{N}])\s*(?:[:=]|is\b)\s*(?:"[^"]*"|'[^']*'|\S+)`,
+  'giu',
+);
+const WINDOWS_PATH = /[A-Za-z]:\\[^\n'"`:*?<>|]*/g;
+const UNC_PATH = /\\\\[^\n'"`:*?<>|]+/g;
+const HOME_PATH = /\/(?:Users|home|Volumes|mnt|root|private|var|tmp|opt)(?=\/)[^\n'"`:;()<>|*?]*/giu;
+const TILDE_PATH = /~[/\\][^\n'"`:;()<>|*?]*/gu;
+const ABSOLUTE_PATH = new RegExp(String.raw`(?<!${NAME_CHARS})(?:/${NAME_CHARS}+){2,}`, 'gu');
+const RELATIVE_PATH = new RegExp(String.raw`(?:${NAME_CHARS}+[/\\]){2,}${NAME_CHARS}+`, 'gu');
 export function redact(text, maxLength = 100) {
   return String(text)
-    .replace(/[A-Za-z]:\\[^\s'"]+/g, '<path>')
-    .replace(/(?:\/[\w.@+~-]+){2,}/g, '<path>')
-    .replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, '<email>')
+    .replace(SECRET_VALUE, '<secret>')
+    .replace(/\bBearer\s+\S+/gi, '<secret>')
+    .replace(WINDOWS_PATH, '<path>')
+    .replace(UNC_PATH, '<path>')
+    .replace(HOME_PATH, '<path>')
+    .replace(TILDE_PATH, '<path>')
+    .replace(ABSOLUTE_PATH, '<path>')
+    .replace(RELATIVE_PATH, '<path>')
+    .replace(/[\p{L}\p{N}._+-]+@[\p{L}\p{N}-]+\.[\p{L}\p{N}.-]+/gu, '<email>')
     .replace(/\b(sk|pk|ghp|gho|xox[a-z]|eyJ)[\w-]{8,}/g, '<key>')
     .replace(/\b[A-Za-z0-9_-]{24,}\b/g, '<token>')
     .replace(/\d+/g, 'N')

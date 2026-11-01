@@ -129,6 +129,20 @@ const sentLines = (home) => JSON.parse(fs.readFileSync(path.join(home, 'state.js
   bad.server.close();
 }
 
+// 4а. лимит на сервере (429) и 503: сессия не ломается, запись остаётся в очереди и уходит позже
+for (const status of [429, 503]) {
+  const home = tempHome(); setConfig(home, { share: true, student_name: 'Тест' });
+  const limited = await startServer((_q, res) => { res.statusCode = status; res.end(); });
+  const result = await runSessionEnd(home, limited.url, writeTranscript(home));
+  check(`ответ ${status}: хук завершился с кодом 0`, result.code === 0);
+  check(`ответ ${status}: запись осталась в очереди`, progressLines(home).length === 1 && !sentLines(home));
+  limited.server.close();
+  const healthy = await startServer(ok);
+  await runSessionEnd(home, healthy.url, writeTranscript(home));
+  check(`после ${status} следующая сессия отправляет обе записи`, healthy.received.length === 2 && sentLines(home) === 2);
+  healthy.server.close();
+}
+
 // 5. не больше 20 за раз
 {
   const home = tempHome(); setConfig(home, { share: true, student_name: 'Тест' });

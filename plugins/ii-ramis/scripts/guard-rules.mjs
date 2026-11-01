@@ -2,14 +2,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { tokenMentionsSecret, realpathNearest } from './lib.mjs';
+import { tokenMentionsSecret, tokenMentionsShellStartup, realpathNearest } from './lib.mjs';
 import { verbName, commandIndex, isAssignment, FETCH_NAMES } from './shell-parse.mjs';
 
 const TRUSTED_HOSTS = new Set([
   'claude.ai', 'bun.sh', 'astral.sh', 'brew.sh', 'deno.land', 'sh.rustup.rs', 'fnm.vercel.app',
 ]);
 const RAW_GITHUB_HOST = 'raw.githubusercontent.com';
-const RAW_GITHUB_PREFIXES = ['/RamisGit-cyber/', '/Homebrew/', '/nvm-sh/', '/thedotmack/'];
+// Доверяем репозиторию курса, Homebrew и nvm целиком, а claude-mem только одному точному файлу.
+const RAW_GITHUB_PREFIXES = ['/RamisGit-cyber/ii-ramis/', '/Homebrew/', '/nvm-sh/'];
+const RAW_GITHUB_EXACT_PATHS = new Set(['/thedotmack/claude-mem/main/install/install.sh']);
 
 // Команды, которым можно упоминать секретный путь: они не читают содержимое.
 const METADATA_VERBS = new Set([
@@ -76,7 +78,25 @@ function secretAllowed(cmd, mentionIndexes) {
   return false;
 }
 
+// Файлы запуска оболочки (~/.zshrc, ~/.bashrc, ~/.profile) и истории команд: можно только посмотреть, что файл есть.
+const STARTUP_METADATA_VERBS = new Set(['ls', 'dir', 'stat', 'test', '[', '[[', 'test-path', 'get-childitem', 'gci', 'get-item', 'gi', 'resolve-path']);
+const STARTUP_REASON = 'файл запуска оболочки или история команд (~/.zshrc, ~/.bashrc, ~/.profile, ~/.zsh_history и т.п.): через Claude их не читают и не правят';
+
+function checkShellStartup(commands) {
+  for (const cmd of commands) {
+    const mentioned = cmd.tokens.some((token, index) => !cmd.consumed.has(index) && tokenMentionsShellStartup(token));
+    if (!mentioned) continue;
+    const first = commandIndex(cmd.tokens);
+    const name = first === -1 ? '' : verbName(cmd.tokens[first]);
+    const redirects = cmd.tokens.some((token) => /^\d*>/.test(token));
+    if (!STARTUP_METADATA_VERBS.has(name) || redirects || cmd.pipedInto || cmd.inSubstitution) return STARTUP_REASON;
+  }
+  return null;
+}
+
 export function checkSecrets(commands) {
+  const startup = checkShellStartup(commands);
+  if (startup) return startup;
   for (const cmd of commands) {
     const mentionIndexes = cmd.tokens
       .map((token, index) => (cmd.consumed.has(index) ? -1 : (tokenMentionsSecret(token) ? index : -1)))
@@ -180,7 +200,8 @@ export function isTrustedUrl(rawUrl) {
   }
   if (url.protocol !== 'https:' || url.username || url.password || url.port) return false;
   if (TRUSTED_HOSTS.has(url.hostname)) return true;
-  return url.hostname === RAW_GITHUB_HOST && RAW_GITHUB_PREFIXES.some((prefix) => url.pathname.startsWith(prefix));
+  if (url.hostname !== RAW_GITHUB_HOST) return false;
+  return RAW_GITHUB_EXACT_PATHS.has(url.pathname) || RAW_GITHUB_PREFIXES.some((prefix) => url.pathname.startsWith(prefix));
 }
 
 // ---- Скрипты из интернета: запрет по умолчанию, смотрим на разобранные команды ----
@@ -216,6 +237,11 @@ function fetchIsTrusted(tokens) {
   return urls > 0;
 }
 
+// После оболочки в строке «скачать и выполнить» допустимы только -s, -c и сам скачанный текст ($()).
+function downloadedScriptHasNoArguments(args) {
+  return args.every((arg) => arg === '-s' || arg === '-c' || arg === '$()' || arg === '-');
+}
+
 export function checkPipeToShell(commands) {
   for (const cmd of commands) {
     const start = commandIndex(cmd.tokens);
@@ -229,6 +255,73 @@ export function checkPipeToShell(commands) {
     const fetchers = [...upstream, ...cmd.subs].filter((c) => c.tokens.some((t) => FETCH_NAMES.has(verbName(t))));
     if (fetchers.some((c) => !fetchIsTrusted(c.tokens))) {
       return 'запуск скрипта, скачанного из интернета, с непроверенного адреса или с нестандартными флагами';
+    }
+    // «Скачать и выполнить» разрешено только без аргументов: через `bash -s -- --share yes` из чата можно включить согласие или режимы.
+    if (fetchers.length > 0 && !downloadedScriptHasNoArguments(cmd.tokens.slice(start + 1))) {
+      return 'скачанному скрипту нельзя передавать аргументы (bash -s -- ..., bash -c "$(...)" _ ...): запусти без них, а настройки ученик задаёт сам в терминале';
+    }
+  }
+  return null;
+}
+
+// ---- Выгрузка файлов наружу: curl -d @файл, --data-binary @файл, -F файл=@..., -T, wget --post-file ----
+// Это страховочная сетка: обычные запросы с коротким текстом (curl -d '{"a":1}') не трогаем.
+// Другие способы отправить файл (scp, rsync, nc, свой скрипт на Node/Python) сетка не ловит, см. README.
+const CURL_UPLOAD_LONG = ['data', 'data-ascii', 'data-binary', 'data-urlencode', 'form', 'upload-file', 'json'];
+const CURL_ARG_SHORT = new Set('AbcCdDeEFHKmoPQrTuUwXxyYz'.split(''));
+const UPLOAD_REASON = 'отправка файла или вывода команды в интернет (curl -d @файл, --data-binary, -F, -T, wget --post-file): страховка не пропускает выгрузку данных';
+
+function curlValueUploads(option, value) {
+  if (value === undefined) return false;
+  if (/[$`]/.test(value)) return true; // содержимое подставляется на лету: $(cat файл), $(< файл)
+  if (option === 'T' || option === 'upload-file') return true; // любой -T: «загрузить файл», в том числе поток из tar
+  if (option === 'data-urlencode') return /^[^=]*@/.test(value);
+  if (option === 'F' || option === 'form') return /(^|=)[@<]/.test(value);
+  return value.startsWith('@');
+}
+
+function curlUploads(args) {
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === '--') break;
+    if (arg.startsWith('--')) {
+      const [rawName, inlineValue] = arg.slice(2).split(/=(.*)/s);
+      const name = rawName.toLowerCase();
+      const option = name.length >= 2 ? CURL_UPLOAD_LONG.find((long) => long.startsWith(name)) : undefined;
+      if (option && curlValueUploads(option, inlineValue ?? args[i + 1])) return true;
+    } else if (/^-[A-Za-z]/.test(arg)) {
+      for (let c = 1; c < arg.length; c += 1) {
+        if (!CURL_ARG_SHORT.has(arg[c])) continue;
+        const value = arg.slice(c + 1) || args[i + 1];
+        if (['d', 'F', 'T'].includes(arg[c]) && curlValueUploads(arg[c], value)) return true;
+        break; // остаток токена и есть значение этого флага
+      }
+    }
+  }
+  return false;
+}
+
+function wgetUploads(args) {
+  return args.some((arg) => /^--(post-file|body-file)(=|$)/i.test(arg) || /^--(post|body)-?f/i.test(arg));
+}
+
+function powershellUploads(args) {
+  for (let i = 0; i < args.length; i += 1) {
+    if (/^-infile$/i.test(args[i])) return true;
+    if (/^-(body|form)$/i.test(args[i]) && /get-content|\bgc\b|readall|[$`(]/i.test(args[i + 1] || '')) return true;
+  }
+  return false;
+}
+
+export function checkUpload(commands) {
+  for (const { tokens } of commands) {
+    for (let index = 0; index < tokens.length; index += 1) {
+      const name = verbName(tokens[index]);
+      const args = tokens.slice(index + 1);
+      if (name === 'curl' && curlUploads(args)) return UPLOAD_REASON;
+      if (name === 'wget' && wgetUploads(args)) return UPLOAD_REASON;
+      if (['iwr', 'irm', 'invoke-webrequest', 'invoke-restmethod'].includes(name) && powershellUploads(args)) return UPLOAD_REASON;
+      if (['http', 'https', 'xh'].includes(name) && args.some((a) => /(^|[^=:])@(?=\S)/.test(a) && !a.includes('://'))) return UPLOAD_REASON;
     }
   }
   return null;

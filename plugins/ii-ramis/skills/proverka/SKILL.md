@@ -17,7 +17,7 @@ description: Проверка компьютера ученика курса «�
    - Node.js: Mac `brew install node` (нет Homebrew — установщик `install.sh` скачает Node в папку ~/.ii-ramis без пароля); Windows `winget install OpenJS.NodeJS.LTS`. Объясни: «Node — двигатель, на котором запускаются сайты, и он нужен моей защите от опасных команд».
    - Python: Mac `brew install python`, Windows `winget install Python.Python.3.12`. Для урока 4 не обязателен.
    - gh: Mac `brew install gh`, Windows `winget install GitHub.cli`. Вход в GitHub (`gh auth login`) ученик делает сам в браузере, ты подскажешь, что нажимать.
-   - Плагины и MCP пакета: если скрипт установки ещё не запускали — запусти установщик: Mac `curl -fsSL https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/main/plugins/ii-ramis/scripts/install.sh | bash`, Windows `irm https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/main/plugins/ii-ramis/scripts/install.ps1 | iex`. Повторный запуск безопасен.
+   - Плагины и MCP пакета: если скрипт установки ещё не запускали — запусти установщик: Mac `curl -fsSL https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/v1.0.0/plugins/ii-ramis/scripts/install.sh | bash`, Windows `irm https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/v1.0.0/plugins/ii-ramis/scripts/install.ps1 | iex`. Повторный запуск безопасен.
 3. Домашка. Скрипт печатает пункты чек-листа по пройденным урокам (`kurs-karta.md`). Для каждого пункта:
    - есть команда — запусти её сам и сообщи результат;
    - написано «спроси» — это проверяется глазами ученика, задай ОДИН короткий вопрос и жди ответ;

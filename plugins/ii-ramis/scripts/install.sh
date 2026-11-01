@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # Установщик пакета «ИИ Рамис» для macOS (и Linux). Идемпотентный: повторный запуск безопасен.
-# Запуск:  curl -fsSL https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/main/plugins/ii-ramis/scripts/install.sh | bash
+# Запуск:  curl -fsSL https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/v1.0.0/plugins/ii-ramis/scripts/install.sh | bash
+# Ставится версия с тега релиза (v1.0.0), а не с ветки main: так ученику не прилетит непроверенный код.
 # Флаги:   --dry-run  показать, что будет сделано, ничего не меняя
-#          --share yes|no   отправлять Рамису краткий итог занятий (по умолчанию спросит; без вопроса = не менять)
+#          --share yes|no   отправлять Рамису краткий итог занятий. «yes» работает ТОЛЬКО при запуске из обычного окна
+#                           терминала (иначе игнорируется: согласие даёт человек, а не команда из чата)
 #          --name "Имя"     как подписывать итог (только если share=yes)
 #          --skip-third-party  поставить только плагин ИИ Рамис (для проверки)
+# Режим Claude «без вопросов» (bypass) и сводки включаются только ответом «да» живого человека в терминале.
 set -u
 
-RAW_BASE="${IIRAMIS_RAW_BASE:-https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/main/plugins/ii-ramis/scripts}"
-MARKETPLACE_SOURCE="${IIRAMIS_MARKETPLACE_SOURCE:-RamisGit-cyber/ii-ramis}"
+RELEASE_TAG="v1.0.0"
+RAW_BASE="${IIRAMIS_RAW_BASE:-https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/$RELEASE_TAG/plugins/ii-ramis/scripts}"
+MARKETPLACE_SOURCE="${IIRAMIS_MARKETPLACE_SOURCE:-RamisGit-cyber/ii-ramis#$RELEASE_TAG}"
 DRY_RUN=0; SHARE=""; STUDENT_NAME=""; SKIP_THIRD=0
 
 while [ $# -gt 0 ]; do
@@ -33,6 +37,15 @@ run() {   # run <описание команды...>; в режиме пробы
   "$@"
 }
 have() { command -v "$1" >/dev/null 2>&1; }
+
+# Запуск «из терминала»: вывод идёт на экран человека и есть откуда читать ответ (stdin или /dev/tty).
+# При запуске из чата Claude вывод перехватывается, поэтому INTERACTIVE=0 и никакие вопросы не задаются.
+INTERACTIVE=0; ANSWER_FROM=/dev/null
+if [ -t 1 ]; then
+  if [ -t 0 ]; then INTERACTIVE=1; ANSWER_FROM=/dev/stdin
+  elif ( : </dev/tty ) 2>/dev/null; then INTERACTIVE=1; ANSWER_FROM=/dev/tty
+  fi
+fi
 
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 OS="$(uname -s)"
@@ -110,6 +123,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true
 SETUP_JS=""
 if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/setup-settings.mjs" ]; then
   SETUP_JS="$SCRIPT_DIR/setup-settings.mjs"
+  if [ "$DRY_RUN" = 0 ]; then   # копия в ~/.ii-ramis: по ней ученик сам включает режим «без вопросов» из терминала
+    mkdir -p "$HOME/.ii-ramis" && cp -f "$SETUP_JS" "$HOME/.ii-ramis/setup-settings.mjs" 2>/dev/null
+  fi
 elif [ -n "$NODE_BIN" ] && [ "$DRY_RUN" = 0 ]; then
   mkdir -p "$HOME/.ii-ramis"
   SETUP_JS="$HOME/.ii-ramis/setup-settings.mjs"
@@ -125,12 +141,17 @@ setup() {   # setup <аргументы setup-settings.mjs>
 }
 
 # ---------- 3. Согласие на отправку итогов ----------
-if [ -z "$SHARE" ] && [ -t 0 ] && [ "$DRY_RUN" = 0 ]; then
+# Из чата (не терминал) согласие дать нельзя: --share yes игнорируем, остальное (no) безопасно.
+if [ "$INTERACTIVE" = 0 ] && [ "$SHARE" = "yes" ]; then
+  say "Флаг --share yes проигнорирован: установщик запущен не из обычного окна терминала. Согласие на отправку итогов даёшь только ты сам, ответом в терминале."
+  SHARE=""; STUDENT_NAME=""
+fi
+if [ -z "$SHARE" ] && [ "$INTERACTIVE" = 1 ] && [ "$DRY_RUN" = 0 ]; then
   say ""
   say "Рамис хочет видеть, где ты застрял, чтобы помочь. Для этого после занятия можно отправлять КРАТКИЙ итог:"
   say "номер урока, сколько раз застрял, какие ошибки (без путей и ключей). Кода и твоих файлов в нём нет."
   printf 'Отправлять итог Рамису? [y/N] '
-  read -r answer
+  read -r answer < "$ANSWER_FROM"
   case "$answer" in y|Y|д|Д|да|Да) SHARE="yes" ;; *) SHARE="no" ;; esac
 fi
 
@@ -180,14 +201,26 @@ if [ "$SKIP_THIRD" = 0 ]; then
 fi
 install_plugin ii-ramis "$MARKETPLACE_SOURCE" ii-ramis
 
-# ---------- 5. Настройки: режим без вопросов, автообновление, согласие ----------
-SETUP_ARGS=(--bypass --marketplace ii-ramis --auto-update ii-ramis)
+# ---------- 5. Настройки: маркетплейс с тега, согласие ----------
+# Автообновление НЕ включаем: обновляться на новую версию ученик будет сам (см. README).
+SETUP_ARGS=(--marketplace ii-ramis)
 [ -n "$SHARE" ] && SETUP_ARGS+=(--share "$SHARE")
 [ -n "$STUDENT_NAME" ] && SETUP_ARGS+=(--student-name "$STUDENT_NAME")
 if OUT="$(setup "${SETUP_ARGS[@]}" 2>&1)"; then
   add_report done "Настройки Claude" "$(printf '%s' "$OUT" | tr '\n' ';' | cut -c1-160)"
 else
   add_report fail "Настройки Claude" "$OUT"
+fi
+
+# Режим «без вопросов»: явный вопрос с предупреждением, по умолчанию «нет». Вопрос задаёт setup-settings.mjs.
+if [ "$DRY_RUN" = 1 ]; then
+  say "  [проба] node setup-settings.mjs --ask-bypass (вопрос про режим «без вопросов», по умолчанию нет)"
+  add_report skip "Режим «без вопросов»" "(проба) будет задан вопрос, по умолчанию «нет»"
+elif [ "$INTERACTIVE" = 1 ] && [ -n "$NODE_BIN" ] && [ -n "$SETUP_JS" ]; then
+  "$NODE_BIN" "$SETUP_JS" --ask-bypass < "$ANSWER_FROM"
+  add_report done "Режим «без вопросов»" "вопрос задан, твой ответ учтён (подробности выше)"
+else
+  add_report need "Режим «без вопросов»" "не включён. Хочешь включить: открой Терминал и вставь node ~/.ii-ramis/setup-settings.mjs --ask-bypass (прочитаешь предупреждение и ответишь сам)"
 fi
 
 # ---------- 6. Итог ----------
@@ -207,6 +240,6 @@ for line in "${REPORT[@]}"; do
 done
 say ""
 say "Дальше: полностью закрой Claude и открой заново, затем напиши в чате «привет». Если что-то в списке не вышло или нужно от тебя, просто скажи об этом ИИ Рамису в чате."
-say "Включить режим «без вопросов» в приложении: Settings > Code > «Allow bypass permissions mode»."
+say "Режим «без вопросов» включается только твоим «да» в терминале (см. выше). Обновления плагина сами не приходят: как обновить, написано в README."
 [ "$FAIL" = 1 ] && exit 1
 exit 0

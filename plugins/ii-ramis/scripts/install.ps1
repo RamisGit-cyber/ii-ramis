@@ -1,5 +1,7 @@
 # Установщик пакета «ИИ Рамис» для Windows (PowerShell). Идемпотентный: повторный запуск безопасен.
-# Запуск:  irm https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/main/plugins/ii-ramis/scripts/install.ps1 | iex
+# Запуск:  irm https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/v1.0.0/plugins/ii-ramis/scripts/install.ps1 | iex
+# Ставится версия с тега релиза (v1.0.0), а не с ветки main. Согласие на сводки и режим «без вопросов» (bypass)
+# включаются только ответом «да» живого человека в окне PowerShell; из чата Claude (вывод перехвачен) они не включаются.
 # Параметры при запуске файла: -DryRun  -Share yes|no  -Name "Имя"  -SkipThirdParty
 # При запуске через `| iex` параметры задаются переменными окружения: IIRAMIS_DRYRUN=1, IIRAMIS_SHARE=yes|no, IIRAMIS_NAME
 param(
@@ -14,8 +16,11 @@ if ($env:IIRAMIS_DRYRUN -eq '1') { $DryRun = $true }
 if (-not $Share -and $env:IIRAMIS_SHARE) { $Share = $env:IIRAMIS_SHARE }
 if (-not $Name -and $env:IIRAMIS_NAME) { $Name = $env:IIRAMIS_NAME }
 
-$RawBase = if ($env:IIRAMIS_RAW_BASE) { $env:IIRAMIS_RAW_BASE } else { 'https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/main/plugins/ii-ramis/scripts' }
-$MarketplaceSource = if ($env:IIRAMIS_MARKETPLACE_SOURCE) { $env:IIRAMIS_MARKETPLACE_SOURCE } else { 'RamisGit-cyber/ii-ramis' }
+$ReleaseTag = 'v1.0.0'
+$RawBase = if ($env:IIRAMIS_RAW_BASE) { $env:IIRAMIS_RAW_BASE } else { "https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/$ReleaseTag/plugins/ii-ramis/scripts" }
+$MarketplaceSource = if ($env:IIRAMIS_MARKETPLACE_SOURCE) { $env:IIRAMIS_MARKETPLACE_SOURCE } else { "RamisGit-cyber/ii-ramis#$ReleaseTag" }
+# Живой человек в окне PowerShell: ввод и вывод не перенаправлены. Из чата Claude это не так.
+$Interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected
 $Report = New-Object System.Collections.ArrayList
 
 function Add-Report([string]$Status, [string]$What, [string]$Detail) {
@@ -83,6 +88,11 @@ $NodeAvailable = Test-Command 'node'
 $SetupJs = $null
 if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot 'setup-settings.mjs'))) {
   $SetupJs = Join-Path $PSScriptRoot 'setup-settings.mjs'
+  if (-not $DryRun) {   # копия в .ii-ramis: по ней ученик сам включает режим «без вопросов» из PowerShell
+    $dataDirCopy = Join-Path $env:USERPROFILE '.ii-ramis'
+    New-Item -ItemType Directory -Force -Path $dataDirCopy | Out-Null
+    Copy-Item -Force $SetupJs (Join-Path $dataDirCopy 'setup-settings.mjs')
+  }
 } elseif ($NodeAvailable -and -not $DryRun) {
   $dataDir = Join-Path $env:USERPROFILE '.ii-ramis'
   New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
@@ -102,7 +112,11 @@ function Invoke-Setup([string[]]$SetupArgs) {
 }
 
 # ---------- 3. Согласие на отправку итогов ----------
-if (-not $Share -and -not $DryRun -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+if (-not $Interactive -and $Share -eq 'yes') {
+  Write-Host 'Параметр Share=yes проигнорирован: установщик запущен не из обычного окна PowerShell. Согласие на отправку итогов даёшь только ты сам, ответом в окне.'
+  $Share = ''; $Name = ''
+}
+if (-not $Share -and -not $DryRun -and $Interactive) {
   Write-Host ''
   Write-Host 'Рамис хочет видеть, где ты застрял, чтобы помочь. Для этого после занятия можно отправлять КРАТКИЙ итог:'
   Write-Host 'номер урока, сколько раз застрял, какие ошибки (без путей и ключей). Кода и твоих файлов в нём нет.'
@@ -152,13 +166,25 @@ if (-not $SkipThirdParty) {
 }
 Install-Plugin 'ii-ramis' $MarketplaceSource 'ii-ramis'
 
-# ---------- 5. Настройки: режим без вопросов, автообновление, согласие ----------
-$setupArgs = @('--bypass', '--marketplace', 'ii-ramis', '--auto-update', 'ii-ramis')
+# ---------- 5. Настройки: маркетплейс с тега, согласие ----------
+# Автообновление НЕ включаем: обновляться на новую версию ученик будет сам (см. README).
+$setupArgs = @('--marketplace', 'ii-ramis')
 if ($Share) { $setupArgs += @('--share', $Share) }
 if ($Name) { $setupArgs += @('--student-name', $Name) }
 $settingsResult = Invoke-Setup $setupArgs
 if ($settingsResult.Ok) { Add-Report 'done' 'Настройки Claude' $settingsResult.Output }
 else { Add-Report 'fail' 'Настройки Claude' $settingsResult.Output }
+
+# Режим «без вопросов»: явный вопрос с предупреждением, по умолчанию «нет». Вопрос задаёт setup-settings.mjs.
+if ($DryRun) {
+  Write-Host '  [проба] node setup-settings.mjs --ask-bypass (вопрос про режим «без вопросов», по умолчанию нет)'
+  Add-Report 'skip' 'Режим «без вопросов»' 'будет задан вопрос, по умолчанию «нет»'
+} elseif ($Interactive -and $NodeAvailable -and $SetupJs) {
+  & node $SetupJs '--ask-bypass'
+  Add-Report 'done' 'Режим «без вопросов»' 'вопрос задан, твой ответ учтён (подробности выше)'
+} else {
+  Add-Report 'need' 'Режим «без вопросов»' 'не включён. Хочешь включить: открой PowerShell и вставь node $env:USERPROFILE\.ii-ramis\setup-settings.mjs --ask-bypass (прочитаешь предупреждение и ответишь сам)'
+}
 
 # ---------- 6. Итог ----------
 Write-Host ''
@@ -176,5 +202,5 @@ foreach ($item in $Report) {
 }
 Write-Host ''
 Write-Host 'Дальше: полностью закрой Claude (и в трее) и открой заново, затем напиши в чате «привет». Если что-то не вышло, скажи об этом ИИ Рамису в чате.'
-Write-Host 'Включить режим «без вопросов» в приложении: Settings > Code > «Allow bypass permissions mode».'
+Write-Host 'Режим «без вопросов» включается только твоим «да» в окне PowerShell (см. выше). Обновления плагина сами не приходят: как обновить, написано в README.'
 if ($hasFail) { exit 1 }

@@ -1,12 +1,13 @@
 // Решение охранника: вернуть причину отказа или null. Отдельный модуль, чтобы поломка импорта не обходила защиту (см. guard.mjs).
-import { tokenMentionsSecret } from './lib.mjs';
+import { tokenMentionsSecret, tokenMentionsShellStartup } from './lib.mjs';
 import { parseShell } from './shell-parse.mjs';
 import { checkDeletion } from './delete-rules.mjs';
 import {
   checkSecrets, checkEnvironmentDump, checkGit, checkDatabase, checkPipeToShell, checkSelfApproval,
-  checkInterpreters, checkUnverifiableReads,
+  checkInterpreters, checkUnverifiableReads, checkUpload,
 } from './guard-rules.mjs';
 import { checkProtectedShell, checkProtectedFileWrite } from './protect-rules.mjs';
+import { checkWebFetch } from './web-rules.mjs';
 
 const WRITE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
@@ -49,6 +50,7 @@ function shellReason(toolName, toolInput, cwd) {
     checkEnvironmentDump(parsed.commands) ||
     checkDeletion(parsed.commands, cwd) ||
     checkGit(parsed.commands) ||
+    checkUpload(parsed.commands) ||
     checkPipeToShell(parsed.commands) ||
     checkInterpreters(parsed.commands, cwd) ||
     checkUnverifiableReads(parsed.commands) ||
@@ -65,6 +67,7 @@ export function decide(input) {
   if (!toolName) throw new Denied('не понял, какой инструмент вызван');
 
   if (SHELL_TOOLS.has(toolName)) return shellReason(toolName, toolInput, cwd);
+  if (toolName === 'WebFetch') return checkWebFetch(toolInput);
 
   for (const value of pathValuesFor(toolName, toolInput)) {
     const selfApproval = checkSelfApproval(value);
@@ -73,6 +76,7 @@ export function decide(input) {
       return checkProtectedFileWrite(value, cwd);
     }
     if (tokenMentionsSecret(value)) return 'обращение к файлу с ключами или паролями (.env, .pem, id_rsa и т.п.)';
+    if (tokenMentionsShellStartup(value)) return 'файл запуска оболочки или история команд (~/.zshrc, ~/.bashrc, ~/.zsh_history и т.п.): через Claude их не читают и не правят';
   }
   return null;
 }
