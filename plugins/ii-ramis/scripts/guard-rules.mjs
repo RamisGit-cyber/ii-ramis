@@ -9,8 +9,9 @@ const TRUSTED_HOSTS = new Set([
   'claude.ai', 'bun.sh', 'astral.sh', 'brew.sh', 'deno.land', 'sh.rustup.rs', 'fnm.vercel.app',
 ]);
 const RAW_GITHUB_HOST = 'raw.githubusercontent.com';
-// Доверяем репозиторию курса, Homebrew и nvm целиком, а claude-mem только одному точному файлу.
-const RAW_GITHUB_PREFIXES = ['/RamisGit-cyber/ii-ramis/', '/Homebrew/', '/nvm-sh/'];
+// Доверяем Homebrew и nvm целиком, а claude-mem только одному точному файлу. Репозиторий курса (RamisGit-cyber/ii-ramis)
+// сюда НЕ входит: наш установщик из Claude не запускается (см. installer-rules.mjs), ученик ставит его сам в Терминале.
+const RAW_GITHUB_PREFIXES = ['/Homebrew/', '/nvm-sh/'];
 const RAW_GITHUB_EXACT_PATHS = new Set(['/thedotmack/claude-mem/main/install/install.sh']);
 
 // Команды, которым можно упоминать секретный путь: они не читают содержимое.
@@ -267,17 +268,28 @@ export function checkPipeToShell(commands) {
 // ---- Выгрузка файлов наружу: curl -d @файл, --data-binary @файл, -F файл=@..., -T, wget --post-file ----
 // Это страховочная сетка: обычные запросы с коротким текстом (curl -d '{"a":1}') не трогаем.
 // Другие способы отправить файл (scp, rsync, nc, свой скрипт на Node/Python) сетка не ловит, см. README.
-const CURL_UPLOAD_LONG = ['data', 'data-ascii', 'data-binary', 'data-urlencode', 'form', 'upload-file', 'json'];
 const CURL_ARG_SHORT = new Set('AbcCdDeEFHKmoPQrTuUwXxyYz'.split(''));
 const UPLOAD_REASON = 'отправка файла или вывода команды в интернет (curl -d @файл, --data-binary, -F, -T, wget --post-file): страховка не пропускает выгрузку данных';
 
 function curlValueUploads(option, value) {
   if (value === undefined) return false;
+  if (option === 'H' || option === 'header') return value.startsWith('@') || /\$\(|`/.test(value); // -H @файл: заголовки из файла; $(cat файл) внутри заголовка
+  if (option === 'variable') return value.includes('@') || value.startsWith('%'); // --variable имя@файл читает файл, %ИМЯ тянет переменную окружения
   if (/[$`]/.test(value)) return true; // содержимое подставляется на лету: $(cat файл), $(< файл)
   if (option === 'T' || option === 'upload-file') return true; // любой -T: «загрузить файл», в том числе поток из tar
-  if (option === 'data-urlencode') return /^[^=]*@/.test(value);
+  if (option === 'data-urlencode' || option === 'url-query') return /^[^=]*@/.test(value);
   if (option === 'F' || option === 'form') return /(^|=)[@<]/.test(value);
   return value.startsWith('@');
+}
+
+// Длинные ключи, значение которых curl может прочитать из файла или подставить: data*, form, upload-file, json, header, variable.
+const CURL_UPLOAD_LONG = ['data', 'data-ascii', 'data-binary', 'data-urlencode', 'form', 'upload-file', 'json', 'header', 'variable', 'url-query'];
+const CURL_FILE_CONFIG_REASON_SHORT = new Set(['K']);
+
+// Ключи, которые запрещены целиком: --config/-K читает команды из файла, --expand-* подставляет {{переменные}} и файлы.
+function curlBannedLongOption(name) {
+  if (name.length >= 3 && 'config'.startsWith(name)) return true;
+  return name.length >= 2 && ('expand-'.startsWith(name) || name.startsWith('expand-'));
 }
 
 function curlUploads(args) {
@@ -287,13 +299,15 @@ function curlUploads(args) {
     if (arg.startsWith('--')) {
       const [rawName, inlineValue] = arg.slice(2).split(/=(.*)/s);
       const name = rawName.toLowerCase();
-      const option = name.length >= 2 ? CURL_UPLOAD_LONG.find((long) => long.startsWith(name)) : undefined;
+      if (curlBannedLongOption(name)) return true;
+      const option = name.length >= 2 && name !== 'url' ? CURL_UPLOAD_LONG.find((long) => long.startsWith(name)) : undefined;
       if (option && curlValueUploads(option, inlineValue ?? args[i + 1])) return true;
     } else if (/^-[A-Za-z]/.test(arg)) {
       for (let c = 1; c < arg.length; c += 1) {
+        if (CURL_FILE_CONFIG_REASON_SHORT.has(arg[c])) return true;
         if (!CURL_ARG_SHORT.has(arg[c])) continue;
         const value = arg.slice(c + 1) || args[i + 1];
-        if (['d', 'F', 'T'].includes(arg[c]) && curlValueUploads(arg[c], value)) return true;
+        if (['d', 'F', 'T', 'H'].includes(arg[c]) && curlValueUploads(arg[c], value)) return true;
         break; // остаток токена и есть значение этого флага
       }
     }
