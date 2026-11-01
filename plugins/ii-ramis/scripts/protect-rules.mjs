@@ -126,7 +126,6 @@ function isConfigSet(args, consent = {}) {
     (args[1] === 'lesson' && /^\d{1,2}$/.test(args[2])) || (args[1] === 'autosave' && /^(true|false)$/.test(args[2])) ||
     (args[1] === 'checked' && /^(true|false)$/.test(args[2])) ||
     (args[1] === 'share' && args[2] === 'false') || // выключить отправку можно всегда
-    (args[1] === 'share_asked' && args[2] === 'true') ||
     (args[1] === 'student_name' && /^[\p{L}\p{N} ._-]{1,40}$/u.test(args[2]) && !/\S{21,}|sk-|ghp_|eyJ/.test(args[2]) && consent.nameAllowed?.() === true));
 }
 

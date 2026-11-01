@@ -26,7 +26,7 @@ try {
     if (decision?.context) output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: decision.context };
   } catch (error) {
     console.error(`ii-ramis consent-hook: не удалось записать: ${error.message}`);
-    output.systemMessage = 'ИИ Рамис (защита): не удалось записать твой ответ про пересказы, отправка осталась выключенной. Напиши «включи отправку пересказов» и ответь ещё раз.';
+    output.systemMessage = 'ИИ Рамис (защита): не удалось записать твой ответ про пересказы, отправка осталась выключенной. Ответь на вопрос ещё раз или напиши «включи отправку пересказов», чтобы получить новый.';
   }
   if (Object.keys(output).length > 0) process.stdout.write(JSON.stringify(output));
 } catch (error) {

@@ -50,7 +50,7 @@ function shellReason(toolName, toolInput, cwd) {
     checkInstallerLaunch(parsed.commands) ||
     checkTerminalWrappers(parsed.commands) ||
     checkAgentMarkerTampering(parsed.commands) ||
-    checkConsentCommand(parsed.commands) ||
+    checkConsentCommand(parsed.commands, command) ||
     checkProtectedShell(parsed.commands, cwd, { nameAllowed: nameMayBeSet }) ||
     checkSecrets(parsed.commands) ||
     checkEnvironmentDump(parsed.commands) ||
