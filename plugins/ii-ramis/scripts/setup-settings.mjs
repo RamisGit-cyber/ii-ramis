@@ -6,9 +6,10 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import readline from 'node:readline/promises';
+import { agentContext } from './agent-context.mjs';
 
 // Версия, с которой ставится плагин: тег релиза, а не ветка main. Обновление на новую версию делается вручную (см. README).
-export const RELEASE_TAG = 'v1.0.0';
+export const RELEASE_TAG = 'v1.0.1';
 
 const KNOWN_MARKETPLACES = {
   'claude-plugins-official': { source: 'github', repo: 'anthropics/claude-plugins-official' },
@@ -27,6 +28,7 @@ const dryRun = args.includes('--dry-run');
 const values = (flag) => args.flatMap((a, i) => (a === flag && args[i + 1] ? [args[i + 1]] : []));
 const log = [];
 let bypassAccepted = false;
+const agentReason = agentContext(); // не null: нас запустил Claude, а не человек в терминале
 
 const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const settingsFile = path.join(claudeDir, 'settings.json');
@@ -85,7 +87,7 @@ function claudeDirDisplay() {
   return process.platform === 'win32' ? '%USERPROFILE%\\.claude' : '~/.claude';
 }
 
-const BYPASS_MANUAL_STEPS = `Режим «без вопросов» НЕ включён: установщик запущен не из обычного окна терминала, а согласие должен дать ты сам.
+const BYPASS_MANUAL_STEPS = `Режим «без вопросов» НЕ включён: скрипт запущен не из обычного окна терминала, а согласие должен дать ты сам.
 Чтобы включить, открой ${process.platform === 'win32' ? 'PowerShell' : 'приложение Терминал'} и вставь:
   node ${process.platform === 'win32' ? '$env:USERPROFILE\\.ii-ramis' : '~/.ii-ramis'}${process.platform === 'win32' ? '\\' : '/'}setup-settings.mjs --ask-bypass
 Либо вручную: в ${path.join(claudeDirDisplay(), 'settings.json')} добавь "permissions": { "defaultMode": "bypassPermissions" }.
@@ -93,6 +95,10 @@ const BYPASS_MANUAL_STEPS = `Режим «без вопросов» НЕ вкл�
 
 // Вопрос задаём только живому человеку в терминале (и ввод, и вывод — терминал). По умолчанию «нет».
 async function askBypass() {
+  if (agentReason) {
+    log.push(`${BYPASS_MANUAL_STEPS}\nВключи сам: открой Терминал (не окно Claude) или переключи тумблер в Claude Desktop: Settings -> Code. (Скрипт видит, что запущен из Claude: ${agentReason}.)`);
+    return;
+  }
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     log.push(BYPASS_MANUAL_STEPS);
     return;
@@ -178,11 +184,16 @@ function updateConfig() {
   const share = values('--share')[0];
   const studentName = values('--student-name')[0];
   if (share === undefined && studentName === undefined) return;
+  if (agentReason && (share === 'yes' || studentName !== undefined)) {
+    // Согласие на сводки даёт человек, а не команда из чата. «no» из чата безопасно и разрешено.
+    log.push(`согласие на отправку итогов Рамису НЕ записано: скрипт запущен из Claude (${agentReason}). Согласие даёшь только ты сам, в обычном окне Терминала.`);
+    if (share !== 'no') return;
+  }
   const file = path.join(dataDir, 'config.json');
   const before = readJson(file);
   const config = { student_id: crypto.randomUUID(), lesson: null, autosave: true, ...before };
   if (share !== undefined) config.share = share === 'yes';
-  if (studentName !== undefined) config.student_name = studentName;
+  if (studentName !== undefined && !agentReason) config.student_name = studentName;
   if (save(file, config, before)) log.push(`отправка Рамису: ${config.share ? 'разрешена' : 'выключена'}`);
 }
 

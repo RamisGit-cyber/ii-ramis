@@ -1,7 +1,8 @@
 # Установщик пакета «ИИ Рамис» для Windows (PowerShell). Идемпотентный: повторный запуск безопасен.
-# Запуск:  irm https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/v1.0.0/plugins/ii-ramis/scripts/install.ps1 | iex
-# Ставится версия с тега релиза (v1.0.0), а не с ветки main. Согласие на сводки и режим «без вопросов» (bypass)
-# включаются только ответом «да» живого человека в окне PowerShell; из чата Claude (вывод перехвачен) они не включаются.
+# Запуск:  irm https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/v1.0.1/plugins/ii-ramis/scripts/install.ps1 | iex
+# Ставится версия с тега релиза (v1.0.1), а не с ветки main. Согласие на сводки и режим «без вопросов» (bypass)
+# включаются только ответом «да» живого человека в окне PowerShell. Если установщик запущен из Claude (переменные
+# CLAUDECODE/CLAUDE_CODE_*/AI_AGENT или программа claude среди предков), он ставит только плагины и безопасные пакеты.
 # Параметры при запуске файла: -DryRun  -Share yes|no  -Name "Имя"  -SkipThirdParty
 # При запуске через `| iex` параметры задаются переменными окружения: IIRAMIS_DRYRUN=1, IIRAMIS_SHARE=yes|no, IIRAMIS_NAME
 param(
@@ -16,11 +17,29 @@ if ($env:IIRAMIS_DRYRUN -eq '1') { $DryRun = $true }
 if (-not $Share -and $env:IIRAMIS_SHARE) { $Share = $env:IIRAMIS_SHARE }
 if (-not $Name -and $env:IIRAMIS_NAME) { $Name = $env:IIRAMIS_NAME }
 
-$ReleaseTag = 'v1.0.0'
+$ReleaseTag = 'v1.0.1'
 $RawBase = if ($env:IIRAMIS_RAW_BASE) { $env:IIRAMIS_RAW_BASE } else { "https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/$ReleaseTag/plugins/ii-ramis/scripts" }
 $MarketplaceSource = if ($env:IIRAMIS_MARKETPLACE_SOURCE) { $env:IIRAMIS_MARKETPLACE_SOURCE } else { "RamisGit-cyber/ii-ramis#$ReleaseTag" }
-# Живой человек в окне PowerShell: ввод и вывод не перенаправлены. Из чата Claude это не так.
-$Interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected
+# Запущен ли установщик из Claude (агентом), а не человеком. Два независимых признака: переменные, которые Claude Code
+# выставляет дочерним процессам (CLAUDECODE, CLAUDE_CODE_*, AI_AGENT), и программа claude среди предков процесса.
+# Псевдотерминал (winpty, conpty из скрипта) делает ввод и вывод «терминальными», поэтому сам по себе он ничего не доказывает.
+function Get-AgentReason {
+  $marker = Get-ChildItem env: -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^(CLAUDECODE|CLAUDE_CODE_.*|AI_AGENT)$' -and $_.Value } | Select-Object -First 1
+  if ($marker) { return "переменная $($marker.Name)" }
+  try {
+    $current = $PID
+    for ($step = 0; $step -lt 20 -and $current -gt 0; $step++) {
+      $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$current" -ErrorAction Stop
+      if (-not $proc) { break }
+      if ($proc.ProcessId -ne $PID -and ($proc.Name -match '^(claude|claude-code)(\.exe)?$' -or $proc.ExecutablePath -match '\\claude\.exe$|\\Claude\\')) { return "запущено из программы $($proc.Name)" }
+      $current = $proc.ParentProcessId
+    }
+  } catch { }
+  return $null
+}
+$AgentReason = Get-AgentReason
+# Живой человек в окне PowerShell: ввод и вывод не перенаправлены И нас запустил не Claude.
+$Interactive = (-not $AgentReason) -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected
 $Report = New-Object System.Collections.ArrayList
 
 function Add-Report([string]$Status, [string]$What, [string]$Detail) {
@@ -92,12 +111,16 @@ if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot 'setup-settings.mjs')
     $dataDirCopy = Join-Path $env:USERPROFILE '.ii-ramis'
     New-Item -ItemType Directory -Force -Path $dataDirCopy | Out-Null
     Copy-Item -Force $SetupJs (Join-Path $dataDirCopy 'setup-settings.mjs')
+    Copy-Item -Force (Join-Path $PSScriptRoot 'agent-context.mjs') (Join-Path $dataDirCopy 'agent-context.mjs')
   }
 } elseif ($NodeAvailable -and -not $DryRun) {
   $dataDir = Join-Path $env:USERPROFILE '.ii-ramis'
   New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
   $SetupJs = Join-Path $dataDir 'setup-settings.mjs'
-  try { Invoke-WebRequest -UseBasicParsing -Uri "$RawBase/setup-settings.mjs" -OutFile $SetupJs -TimeoutSec 30 }
+  try {
+    Invoke-WebRequest -UseBasicParsing -Uri "$RawBase/agent-context.mjs" -OutFile (Join-Path $dataDir 'agent-context.mjs') -TimeoutSec 30
+    Invoke-WebRequest -UseBasicParsing -Uri "$RawBase/setup-settings.mjs" -OutFile $SetupJs -TimeoutSec 30
+  }
   catch { $SetupJs = $null; Write-Host "Не скачал setup-settings.mjs: $($_.Exception.Message)" }
 }
 function Invoke-Setup([string[]]$SetupArgs) {
@@ -113,7 +136,8 @@ function Invoke-Setup([string[]]$SetupArgs) {
 
 # ---------- 3. Согласие на отправку итогов ----------
 if (-not $Interactive -and $Share -eq 'yes') {
-  Write-Host 'Параметр Share=yes проигнорирован: установщик запущен не из обычного окна PowerShell. Согласие на отправку итогов даёшь только ты сам, ответом в окне.'
+  $why = if ($AgentReason) { " ($AgentReason)" } else { '' }
+  Write-Host "Параметр Share=yes проигнорирован: установщик запущен не живым человеком в обычном окне PowerShell$why. Согласие на отправку итогов даёшь только ты сам: открой PowerShell (не окно Claude) и запусти установщик там."
   $Share = ''; $Name = ''
 }
 if (-not $Share -and -not $DryRun -and $Interactive) {
@@ -182,6 +206,8 @@ if ($DryRun) {
 } elseif ($Interactive -and $NodeAvailable -and $SetupJs) {
   & node $SetupJs '--ask-bypass'
   Add-Report 'done' 'Режим «без вопросов»' 'вопрос задан, твой ответ учтён (подробности выше)'
+} elseif ($AgentReason) {
+  Add-Report 'need' 'Режим «без вопросов»' 'не включён: установщик запущен из Claude. Включи сам, если хочешь: открой PowerShell (не окно Claude) и вставь node $env:USERPROFILE\.ii-ramis\setup-settings.mjs --ask-bypass, либо тумблер в Claude Desktop: Settings -> Code. Тем же способом, отдельно, даётся согласие на отправку итогов.'
 } else {
   Add-Report 'need' 'Режим «без вопросов»' 'не включён. Хочешь включить: открой PowerShell и вставь node $env:USERPROFILE\.ii-ramis\setup-settings.mjs --ask-bypass (прочитаешь предупреждение и ответишь сам)'
 }

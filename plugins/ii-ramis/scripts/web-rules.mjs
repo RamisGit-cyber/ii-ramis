@@ -1,6 +1,7 @@
 // Страховка для WebFetch: адрес может быть «письмом наружу» (ключ или кусок файла, зашитый в адрес).
 // Обычное чтение документации (длинные, но нормальные адреса, параметры ?page=2&lang=ru) не трогаем.
 import { mentionsSecretPath, tokenMentionsShellStartup } from './lib.mjs';
+import { isInternalHost } from './host-rules.mjs';
 
 const MAX_URL_LENGTH = 1200;
 const MAX_VALUE_LENGTH = 120;
@@ -35,7 +36,7 @@ export function checkWebFetch(toolInput) {
   }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return `${REASON_PREFIX}: схема ${url.protocol} не разрешена`;
   if (url.username || url.password) return `${REASON_PREFIX}: в адресе логин или пароль`;
-  if (/^169\.254\.|^metadata\.google\.internal$|^fd00:ec2::/i.test(url.hostname)) return `${REASON_PREFIX}: служебный адрес облака (там лежат ключи сервера)`;
+  if (isInternalHost(url.hostname)) return `${REASON_PREFIX}: внутренний адрес (этот компьютер, домашняя сеть или служебный адрес облака, где лежат ключи сервера)`;
   if (raw.length > MAX_URL_LENGTH) return `${REASON_PREFIX}: адрес слишком длинный (${raw.length} символов)`;
   if (url.hostname.split('.').some((label) => hasBlob(label))) return `${REASON_PREFIX}: в имени сайта закодированные данные`;
 
