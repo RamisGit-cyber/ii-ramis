@@ -1,38 +1,49 @@
-// Согласие на пересказы сессий даётся в чате. Строгая проверка (fail closed): `config.mjs set share true` проходит, только если
-//   1) в истории сессии прямо перед ответом ученика стоит сообщение ассистента с ТОЧНЫМ вопросом CONSENT_QUESTION,
-//   2) ответ ученика (его последнее настоящее сообщение) это целиком «да», «yes», «ок» или «согласен», без добавок,
-//   3) история сессии (transcript_path) есть и читается.
-// Это сетка, а не стена: кто умеет подделать историю сессии, это обойдёт. Главное правило остаётся в навыке ii-ramis.
+// Согласие на пересказы сессий даётся в чате, а фиксирует его ХУК UserPromptSubmit (consent-hook.mjs), не Claude.
+// Хук видит настоящий текст, который набрал ученик, и сам пишет share=true в config.json. Claude эту запись сделать не может:
+// `config.mjs set share true` запрещён ему полностью (checkConsentCommand), а ~/.ii-ramis защищена от записи.
+// Условия согласия: (1) наставник перед вопросом поставил одноразовый флаг consent_asked, (2) если историю сессии
+// можно прочитать, последний ход ассистента состоит ровно из вопроса CONSENT_QUESTION (единственный текстовый блок),
+// (3) ответ ученика целиком «да», «yes», «ок» или «согласен». Флаг гасится при ЛЮБОМ следующем сообщении ученика.
 import fs from 'node:fs';
 import { CONFIG_FILE, readJson } from './lib.mjs';
 
 export const CONSENT_QUESTION = 'Можно отправлять Рамису короткий пересказ твоих занятий (без кода и паролей), чтобы он видел, где тебе помочь? да/нет';
 
-const READ_TAIL_BYTES = 512 * 1024;
+const READ_TAIL_BYTES = 1024 * 1024;
 const YES_ANSWER = /^\s*(?:да|yes|ок|окей|ok|okay|согласен|согласна)[\s.!)]*$/iu;
-const REASON = 'включить отправку пересказов можно только если ты ровно перед этим задал ученику вопрос из навыка слово в слово ' +
-  `(«${CONSENT_QUESTION}») и его следующее сообщение целиком «да» (или «yes», «ок», «согласен»). Задай вопрос, дождись ответа и только потом выполни команду. ` +
-  'Не включай отправку сам, не уговаривай и не повторяй команду, пока ученик не ответил';
-const NAME_REASON = 'записать имя можно только после того, как ученик согласился на пересказы (share включён по его явному «да»)';
+const NO_ANSWER = /^\s*(?:нет|no|не надо|не хочу|не согласен|не согласна|не отправляй)[\s.!)]*$/iu;
+const SHARE_ON_REASON = 'включать отправку пересказов Claude не может совсем: согласие фиксирует защитный хук, когда ученик сам ответил «да» на твой вопрос. ' +
+  `Задай вопрос слово в слово («${CONSENT_QUESTION}») отдельным сообщением, перед этим выполни set consent_asked true, и жди ответа. Команду set share true не повторяй`;
+const NAME_REASON = 'записать имя можно только после того, как ученик согласился на пересказы (share включён хуком по его явному «да»)';
 
 const normalize = (text) => String(text).replace(/\s+/g, ' ').trim();
+const QUESTION_NORMALIZED = normalize(CONSENT_QUESTION);
 
+const configTokenAt = (tokens) => tokens.findIndex((t) => /(^|[\\/])config\.mjs$/i.test(String(t).replace(/['"]/g, '')));
 export function isShareOn(tokens) {
-  const at = tokens.findIndex((t) => /(^|[\\/])config\.mjs$/i.test(String(t).replace(/['"]/g, '')));
-  return at !== -1 && tokens[at + 1] === 'set' && tokens[at + 2] === 'share' && String(tokens[at + 3]).toLowerCase() === 'true';
+  const at = configTokenAt(tokens);
+  return at !== -1 && tokens[at + 1] === 'set' && tokens[at + 2] === 'share' && String(tokens[at + 3]).toLowerCase() !== 'false';
 }
-
 export function isStudentNameSet(tokens) {
-  const at = tokens.findIndex((t) => /(^|[\\/])config\.mjs$/i.test(String(t).replace(/['"]/g, '')));
+  const at = configTokenAt(tokens);
   return at !== -1 && tokens[at + 1] === 'set' && tokens[at + 2] === 'student_name';
 }
 
-function textBlocks(entry) {
+export const answerIsYes = (text) => typeof text === 'string' && text.length <= 40 && YES_ANSWER.test(text);
+export const answerIsNo = (text) => typeof text === 'string' && text.length <= 40 && NO_ANSWER.test(text);
+
+function blocksOf(entry) {
   const content = entry?.message?.content;
-  const blocks = Array.isArray(content) ? content : typeof content === 'string' ? [{ type: 'text', text: content }] : [];
-  return { blocks, hasToolResult: blocks.some((b) => b.type === 'tool_result'),
-    text: blocks.filter((b) => b.type === 'text').map((b) => b.text || '').join(' ')
-      .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, ' ').trim() };
+  return Array.isArray(content) ? content : typeof content === 'string' ? [{ type: 'text', text: content }] : [];
+}
+const stripReminders = (text) => String(text).replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, ' ').trim();
+const SERVICE_ENTRY = (entry) => entry?.isMeta || entry?.isSidechain || entry?.isCompactSummary || entry?.isVisibleInTranscriptOnly;
+function studentText(entry) {
+  if (entry?.type !== 'user' || SERVICE_ENTRY(entry)) return null;
+  const blocks = blocksOf(entry);
+  if (blocks.some((b) => b.type === 'tool_result')) return null;
+  const text = stripReminders(blocks.filter((b) => b.type === 'text').map((b) => b.text || '').join(' '));
+  return text || null;
 }
 
 function readTailEntries(transcriptPath) {
@@ -54,60 +65,56 @@ function readTailEntries(transcriptPath) {
   return entries;
 }
 
-// Возвращает { answer, question } : последний настоящий ответ ученика и текст ассистента непосредственно перед ним.
-export function lastExchange(transcriptPath) {
-  const entries = readTailEntries(transcriptPath);
+// Тексты последнего хода ассистента (все текстовые блоки подряд до предыдущего настоящего сообщения ученика).
+// Запись о текущем сообщении ученика (prompt) может уже лежать в истории: тогда пропускаем её.
+export function lastAssistantTurnTexts(entries, prompt) {
   let index = entries.length - 1;
-  let answer = null;
+  const current = studentText(entries[index]);
+  if (current !== null && normalize(current) === normalize(prompt)) index -= 1;
+  const texts = [];
   for (; index >= 0; index -= 1) {
     const entry = entries[index];
-    if (entry.type !== 'user' || entry.isMeta) continue;
-    const { hasToolResult, text } = textBlocks(entry);
-    if (hasToolResult || !text) continue;
-    answer = text;
-    break;
-  }
-  if (answer === null) return { answer: null, question: null };
-  for (index -= 1; index >= 0; index -= 1) {
-    const entry = entries[index];
-    if (entry.type === 'assistant') {
-      const { text } = textBlocks(entry);
-      if (text) return { answer, question: text };
-    } else if (entry.type === 'user' && !entry.isMeta) {
-      const { hasToolResult, text } = textBlocks(entry);
-      if (!hasToolResult && text) return { answer, question: null }; // между вопросом и ответом был ещё один ответ ученика
+    if (studentText(entry) !== null) break; // дошли до предыдущего сообщения ученика
+    if (entry?.type !== 'assistant' || entry.isSidechain) continue;
+    for (const block of blocksOf(entry).slice().reverse()) {
+      if (block.type === 'text' && normalize(block.text || '')) texts.unshift(normalize(block.text));
     }
   }
-  return { answer, question: null };
+  return texts;
 }
 
-export function answerIsYes(text) {
-  return typeof text === 'string' && text.length <= 40 && YES_ANSWER.test(text);
-}
-
-export function exchangeIsConsent({ answer, question }) {
-  return question !== null && answer !== null && normalize(question).includes(normalize(CONSENT_QUESTION)) && answerIsYes(answer);
-}
-
-// true только при подтверждённом согласии; нет истории или она не читается — false (fail closed).
-export function shareConsentGiven(transcriptPath) {
-  if (!transcriptPath || typeof transcriptPath !== 'string') return false;
+// 'yes' — последний ход ассистента ровно вопрос; 'no' — там что-то другое; 'unreadable' — историю прочитать не удалось.
+export function questionJustAsked(transcriptPath, prompt) {
+  if (!transcriptPath || typeof transcriptPath !== 'string') return 'unreadable';
   try {
-    return exchangeIsConsent(lastExchange(transcriptPath));
+    const texts = lastAssistantTurnTexts(readTailEntries(transcriptPath), prompt);
+    return texts.length === 1 && texts[0] === QUESTION_NORMALIZED ? 'yes' : 'no';
   } catch {
-    return false;
+    return 'unreadable';
   }
 }
 
-// Имя можно записать только когда share уже включён (то есть согласие было подтверждено строгой проверкой выше).
+// Решение хука UserPromptSubmit. config: текущий config.json. Возвращает { patch } для config.json или null (ничего не менять).
+// Флаг consent_asked одноразовый: гасится при любом сообщении ученика.
+export function decideConsent({ config, prompt, transcriptPath }) {
+  if (config.consent_asked !== true) return null;
+  const patch = { consent_asked: false };
+  const verdict = questionJustAsked(transcriptPath, prompt);
+  if (verdict === 'no') return { patch }; // вопрос не был последним ходом: ответ относится не к нему
+  if (answerIsYes(prompt)) return { patch: { ...patch, share: true, share_asked: true } };
+  if (answerIsNo(prompt)) return { patch: { ...patch, share: false, share_asked: true } };
+  return { patch };
+}
+
+// Имя можно записать только когда share уже включён хуком.
 export function nameMayBeSet() {
   return readJson(CONFIG_FILE, {}).share === true;
 }
 
-// commands: разобранные команды; transcriptPath: из ввода хука.
-export function checkConsentCommand(commands, transcriptPath) {
+// Команды Claude: share=true запрещён всегда; student_name только при включённом share.
+export function checkConsentCommand(commands) {
   for (const cmd of commands) {
-    if (isShareOn(cmd.tokens) && !shareConsentGiven(transcriptPath)) return REASON;
+    if (isShareOn(cmd.tokens)) return SHARE_ON_REASON;
     if (isStudentNameSet(cmd.tokens) && !nameMayBeSet()) return NAME_REASON;
   }
   return null;

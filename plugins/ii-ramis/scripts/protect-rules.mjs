@@ -15,7 +15,7 @@ const REASON = `изменение настроек Claude Code, папки пл
 // Защищено только то, что отключает или подменяет защиту. Память, skills, agents, commands, CLAUDE.md и данные claude-mem
 // (они лежат в ~/.claude-mem) ученику и Claude писать можно.
 const PROTECTED_PATTERNS = [
-  /\.claude[/\\]settings/i, /\.claude[/\\](plugins|hooks)(?=$|[/\\\s'"*])/i, /\.claude\.json(?=$|[\s'"])/i, /\.ii-ramis[/\\]config\.json/i,
+  /\.claude[/\\]projects[/\\].*\.jsonl/i, /\.claude[/\\]settings/i, /\.claude[/\\](plugins|hooks)(?=$|[/\\\s'"*])/i, /\.claude\.json(?=$|[\s'"])/i, /\.ii-ramis[/\\]config\.json/i,
 ];
 // ~/.ii-ramis защищена целиком (там же лежит установленный node), кроме файлов, которые пишут сами хуки.
 const PROTECTED_DIRS = [
@@ -75,6 +75,8 @@ function matchesProtected(candidate) {
   if (PROTECTED_FILES.some((file) => same(candidate, file))) return true;
   // и наоборот: путь, внутри которого лежит защищённое (~, ~/.claude, /): mv, rm, cp -r, chmod задели бы и его
   if ([...dirs, ...PROTECTED_FILES].some((target) => insideOrEqual(target.toLowerCase(), lower))) return true;
+  // истории сессий Claude (~/.claude/projects/**/*.jsonl): их читает защита, Claude их править не должен. Память (*.md) рядом остаётся доступной.
+  if (/[/\\]\.claude[/\\]projects[/\\].+\.jsonl$/i.test(candidate)) return true;
   return same(path.basename(path.dirname(candidate)), '.claude') && path.basename(candidate).toLowerCase().startsWith('settings');
 }
 
@@ -120,15 +122,15 @@ function resolvesToScript(token, names, cwd) {
   return path.dirname(resolved) === path.join(PLUGIN_ROOT, 'scripts') && names.has(path.basename(resolved));
 }
 
-// consent: { shareConsent(): boolean, nameAllowed(): boolean }. Без него (или при false) share=true и student_name не проходят.
+// consent: { nameAllowed(): boolean }. share=true Claude не включает вообще: это делает хук UserPromptSubmit (consent-hook.mjs).
 function isConfigSet(args, consent = {}) {
   return args.length === 3 && args[0] === 'set' && (
     (args[1] === 'lesson' && /^\d{1,2}$/.test(args[2])) || (args[1] === 'autosave' && /^(true|false)$/.test(args[2])) ||
     (args[1] === 'checked' && /^(true|false)$/.test(args[2])) ||
     (args[1] === 'share' && args[2] === 'false') || // выключить отправку можно всегда
-    (args[1] === 'share' && args[2] === 'true' && consent.shareConsent?.() === true) || // включить: только после подтверждённого «да» (consent-rules.mjs)
     (args[1] === 'share_asked' && args[2] === 'true') ||
-    (args[1] === 'student_name' && /^[\p{L}\p{N} ._-]{1,40}$/u.test(args[2]) && consent.nameAllowed?.() === true));
+    (args[1] === 'consent_asked' && args[2] === 'true') || // одноразовый флаг «вопрос о согласии задан»; гасит его хук
+    (args[1] === 'student_name' && /^[\p{L}\p{N} ._-]{1,40}$/u.test(args[2]) && !/\S{21,}|sk-|ghp_|eyJ/.test(args[2]) && consent.nameAllowed?.() === true));
 }
 
 function isPluginCommand(tokens) {

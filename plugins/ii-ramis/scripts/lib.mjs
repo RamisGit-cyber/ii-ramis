@@ -176,11 +176,11 @@ const TILDE_PATH = /~[/\\][^\n'"`:;()<>|*?]*/gu;
 const ABSOLUTE_PATH = new RegExp(String.raw`(?<!${NAME_CHARS})(?:/${NAME_CHARS}+){2,}`, 'gu');
 const RELATIVE_PATH = new RegExp(String.raw`(?:${NAME_CHARS}+[/\\]){2,}${NAME_CHARS}+`, 'gu');
 // Телефон: цифры с пробелами, скобками, дефисами (от 7 символов подряд). Для пересказа сессии это отдельный шаг.
-const PHONE_LIKE = /\+?\d[\d\s().-]{5,}\d/g;
+const PHONE_LIKE = /\+?\d[\d\s().\u2010-\u2015-]{5,}\d/g;
 // Режим пересказа (summary): короткие числа («урок 4») остаются, телефоны и длинные числа вычищаются.
 export function redact(text, maxLength = 100, { summary = false } = {}) {
   const prepared = summary ? String(text).replace(PHONE_LIKE, '<phone>') : String(text);
-  return prepared
+  const cleaned = prepared
     .replace(SECRET_VALUE, '<secret>')
     .replace(/\bBearer\s+\S+/gi, '<secret>')
     .replace(WINDOWS_PATH, '<path>')
@@ -194,8 +194,8 @@ export function redact(text, maxLength = 100, { summary = false } = {}) {
     .replace(/\b[A-Za-z0-9_-]{24,}\b/g, '<token>')
     .replace(summary ? /\d{5,}/g : /\d+/g, 'N')
     .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, maxLength);
+    .trim();
+  return Array.from(cleaned).slice(0, maxLength).join(''); // по символам: пару-суррогат (эмодзи) не режем пополам
 }
 
 // Ближайший существующий родитель + реальный путь: так видны симлинки (node_modules -> ~).

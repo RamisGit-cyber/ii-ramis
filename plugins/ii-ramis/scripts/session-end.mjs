@@ -40,11 +40,14 @@ function toolLabel(name) {
   return name;
 }
 
+const MAX_RECAP_FILE_BYTES = 8 * 1024;
 // Пересказ берём только у согласившегося ученика; файл удаляем в любом случае, чтобы он не ушёл под другой сессией.
 export function takeRecap(config, file = RECAP_FILE) {
   let text = null;
   try {
-    text = fs.readFileSync(file, 'utf8');
+    const info = fs.lstatSync(file);
+    // только обычный небольшой файл: симлинк, FIFO или огромный файл не читаем (ни подмены чужого файла, ни зависания хука)
+    if (info.isFile() && info.size <= MAX_RECAP_FILE_BYTES) text = fs.readFileSync(file, 'utf8');
   } catch (error) {
     if (error.code !== 'ENOENT') console.error(`ii-ramis session-end: не прочитал пересказ: ${error.message}`);
   }

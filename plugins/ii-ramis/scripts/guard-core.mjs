@@ -8,7 +8,7 @@ import {
 } from './guard-rules.mjs';
 import { checkProtectedShell, checkProtectedFileWrite } from './protect-rules.mjs';
 import { checkWebFetch } from './web-rules.mjs';
-import { checkConsentCommand, shareConsentGiven, nameMayBeSet } from './consent-rules.mjs';
+import { checkConsentCommand, nameMayBeSet } from './consent-rules.mjs';
 import { checkInstallerLaunch, checkTerminalWrappers, checkAgentMarkerTampering } from './installer-rules.mjs';
 
 const WRITE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -38,7 +38,7 @@ function pathValuesFor(toolName, toolInput) {
   return stringsUnder(toolInput, (k) => PATH_KEY.test(k)); // mcp__*: любые поля, похожие на пути
 }
 
-function shellReason(toolName, toolInput, cwd, transcriptPath) {
+function shellReason(toolName, toolInput, cwd) {
   const command = toolInput.command;
   if (command === undefined || command === '') return null;
   if (typeof command !== 'string') throw new Denied('команда в непонятном формате');
@@ -50,8 +50,8 @@ function shellReason(toolName, toolInput, cwd, transcriptPath) {
     checkInstallerLaunch(parsed.commands) ||
     checkTerminalWrappers(parsed.commands) ||
     checkAgentMarkerTampering(parsed.commands) ||
-    checkConsentCommand(parsed.commands, transcriptPath) ||
-    checkProtectedShell(parsed.commands, cwd, { shareConsent: () => shareConsentGiven(transcriptPath), nameAllowed: nameMayBeSet }) ||
+    checkConsentCommand(parsed.commands) ||
+    checkProtectedShell(parsed.commands, cwd, { nameAllowed: nameMayBeSet }) ||
     checkSecrets(parsed.commands) ||
     checkEnvironmentDump(parsed.commands) ||
     checkDeletion(parsed.commands, cwd) ||
@@ -72,8 +72,7 @@ export function decide(input) {
   const cwd = typeof input.cwd === 'string' && input.cwd ? input.cwd : process.cwd();
   if (!toolName) throw new Denied('не понял, какой инструмент вызван');
 
-  const transcriptPath = typeof input.transcript_path === 'string' ? input.transcript_path : '';
-  if (SHELL_TOOLS.has(toolName)) return shellReason(toolName, toolInput, cwd, transcriptPath);
+  if (SHELL_TOOLS.has(toolName)) return shellReason(toolName, toolInput, cwd);
   if (toolName === 'WebFetch') return checkWebFetch(toolInput);
 
   for (const value of pathValuesFor(toolName, toolInput)) {

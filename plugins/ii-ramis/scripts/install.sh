@@ -110,7 +110,9 @@ if have gh; then
 fi
 
 # ---------- 2. Скрипт настроек (рядом лежит или скачиваем) ----------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
+# при `curl | bash` BASH_SOURCE пуст: тогда локальные файлы НЕ берём (иначе подхватился бы setup-settings.mjs из текущей папки)
+SCRIPT_DIR=""
+[ -n "${BASH_SOURCE[0]:-}" ] && SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
 SETUP_JS=""
 if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/setup-settings.mjs" ]; then
   SETUP_JS="$SCRIPT_DIR/setup-settings.mjs"
