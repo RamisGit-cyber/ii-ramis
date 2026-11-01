@@ -2,7 +2,7 @@
 // Здесь: (1) запрет запускать наши install.sh / install.ps1 / setup-settings.mjs из Claude в любой форме,
 // (2) запрет обёрток с псевдотерминалом, которыми можно «сыграть человека» (script, expect, socat, python pty, /dev/tty),
 // (3) запрет стирать переменные, по которым установщик понимает, что его запустил Claude.
-// Главная защита всё равно в самих установщиках (agent-context.mjs): они сами отказываются включать согласия из-под Claude.
+// Согласия на пересказы установщики больше не принимают: их фиксирует хук UserPromptSubmit (consent-hook.mjs).
 import { expandBraces } from './lib.mjs';
 import { verbName, commandIndex } from './shell-parse.mjs';
 

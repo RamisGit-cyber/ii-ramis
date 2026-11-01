@@ -2,7 +2,7 @@
 // Только при согласии ученика (config.share === true). Любая ошибка тихая: запись остаётся в progress.jsonl
 // и уходит при следующей сессии (до 20 штук за раз). Через node fetch, не curl.
 import fs from 'node:fs';
-import { PROGRESS_FILE, STATE_FILE, readJson, writeJson } from './lib.mjs';
+import { PROGRESS_FILE, STATE_FILE, RECAP_MAX_CHARS, readJson, writeJson, redact } from './lib.mjs';
 import { REPORT_URL, ANON_KEY } from './report-config.mjs';
 
 const MAX_PER_RUN = 20;
@@ -29,6 +29,16 @@ function buildSummary(record) {
   return null;
 }
 
+// recap чистим ещё раз при отправке: progress.jsonl лежит на диске и мог быть изменён после session-end.
+function recapField(value) {
+  const clean = typeof value === 'string' ? redact(value, RECAP_MAX_CHARS, { summary: true }) : '';
+  return clean ? { recap: clean } : {};
+}
+
+export function resolveReportUrl(override) {
+  return override && /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(override) ? override : REPORT_URL;
+}
+
 export function buildRow(record, config) {
   if (!INSTALL_ID.test(String(config.install_id || ''))) return null;
   const summary = buildSummary(record);
@@ -43,10 +53,22 @@ export function buildRow(record, config) {
     stuck: record.stuck === true,
     errors: clamp(errorCount, 0, 1000),
     summary,
+    ...recapField(record.recap),
   };
 }
 
+// Колонки recap может ещё не быть в базе (миграция применяется отдельно): тогда сервер отвечает 400.
+// Не теряем запись, а шлём ту же строку без пересказа.
 async function post(url, row, timeoutMs) {
+  const result = await postOnce(url, row, timeoutMs);
+  if (result === 'drop' && row.recap !== undefined) {
+    const { recap, ...withoutRecap } = row;
+    return postOnce(url, withoutRecap, timeoutMs);
+  }
+  return result;
+}
+
+async function postOnce(url, row, timeoutMs) {
   try {
     const response = await fetch(url, {
       method: 'POST',
@@ -70,7 +92,8 @@ async function post(url, row, timeoutMs) {
 // Записи, сделанные без согласия, пропускаются и не уходят никогда, даже если согласие дали позже.
 export async function flushQueue(config) {
   if (config.share !== true || !fs.existsSync(PROGRESS_FILE)) return;
-  const url = process.env.IIRAMIS_REPORT_URL || REPORT_URL; // подмена адреса только через переменную окружения (для тестов)
+  // подмена адреса только для тестов и только на локальный сервер: чужой адрес из окружения проекта не принимаем
+  const url = resolveReportUrl(process.env.IIRAMIS_REPORT_URL);
   const lines = fs.readFileSync(PROGRESS_FILE, 'utf8').split('\n').filter(Boolean);
   const state = readJson(STATE_FILE, {});
   let position = Math.min(Number(state.sentLines) || 0, lines.length);

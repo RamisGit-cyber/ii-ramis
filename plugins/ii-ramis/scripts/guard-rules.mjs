@@ -178,7 +178,7 @@ export function checkDatabase(command) {
     [/\btruncate\s+(table\s+)?\w+/i, 'очистка таблицы (TRUNCATE)'],
     [/\bdelete\s+from\s+[\w."]+\s*(;|"|'|$)/i, 'DELETE без условия WHERE: сотрёт все строки'],
     [/(^|[\s;&|])dropdb(\s|$)/i, 'dropdb: удаление базы'],
-    [/supabase\s+(db\s+reset|projects\s+delete)/i, 'сброс или удаление проекта Supabase'],
+    [/supabase(?:@\S+)?\s+(?:--?\S+\s+)*(db\s+reset|projects\s+delete)/i, 'сброс или удаление проекта Supabase'],
     [/prisma\s+(migrate\s+reset|db\s+push[^|;&]*(--force-reset|--accept-data-loss))/i, 'сброс базы через Prisma'],
     [/dropdatabase|flushall|flushdb/i, 'удаление данных из базы'],
     [/gh\s+repo\s+delete/i, 'удаление репозитория на GitHub'],

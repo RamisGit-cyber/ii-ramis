@@ -1,8 +1,10 @@
-# Проверка компьютера ученика (Windows, PowerShell). Ничего не меняет, только печатает понятный отчёт.
+﻿# Проверка компьютера ученика (Windows, PowerShell). Ничего не меняет, только печатает понятный отчёт.
 # Использование: powershell -ExecutionPolicy Bypass -File diagnose.ps1 [-ProjectDir папка]
 param([string]$ProjectDir = (Get-Location).Path)
 
 $ErrorActionPreference = 'Continue'
+# Отчёт по-русски читает Claude через канал: ставим UTF-8 (в своём процессе, -File). Файл сохранён с BOM, иначе PowerShell 5.1 читает его в системной кодировке.
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { Write-Host "UTF-8 output not set: $($_.Exception.Message)" }
 $Here = $PSScriptRoot
 $KursMap = Join-Path $Here '..\skills\ii-ramis\references\kurs-karta.md'
 $ClaudeHome = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE '.claude' }

@@ -178,6 +178,75 @@ for (const status of [429, 503]) {
   hang.server.close();
 }
 
+// 7а. пересказ сессии (recap): чистится redact, ≤ 400 символов, только по согласию, файл удаляется
+{
+  const dirty = 'Ученик делал лендинг, урок 4. Писал на aibek@example.com, звонил +996 555 123 456, ключ sk-abcdefghijklmnop123456, папка /Users/aibek/site/src. Застрял на деплое. ' + 'Долгий хвост. '.repeat(60);
+  const { server, received, url } = await startServer(ok);
+  const home = tempHome(); setConfig(home, { share: true, student_name: 'Тест' });
+  fs.writeFileSync(path.join(home, 'recap.txt'), dirty);
+  await runSessionEnd(home, url, writeTranscript(home));
+  const row = JSON.parse(received[0].body);
+  check('recap уходит строкой ≤ 400 символов', typeof row.recap === 'string' && row.recap.length > 20 && row.recap.length <= 400);
+  check('recap сохраняет смысл и короткие числа («урок 4»)', row.recap.includes('лендинг') && row.recap.includes('урок 4'));
+  for (const leak of ['aibek@example.com', '555 123 456', '996', 'sk-abcdef', '/Users/aibek']) {
+    check(`в recap нет «${leak}»`, !row.recap.includes(leak));
+  }
+  check('файл recap.txt удалён после сессии', !fs.existsSync(path.join(home, 'recap.txt')));
+  check('с recap добавлено только поле recap', Object.keys(row).sort().join() === 'errors,install_id,lesson,os,recap,stuck,student,summary');
+  server.close();
+}
+{
+  const { server, received, url } = await startServer(ok);
+  const home = tempHome(); setConfig(home, { share: false });
+  fs.writeFileSync(path.join(home, 'recap.txt'), 'Ученик делал сайт');
+  await runSessionEnd(home, url, writeTranscript(home));
+  check('без согласия recap не сохраняется даже локально', !progressLines(home)[0].includes('Ученик делал сайт') && received.length === 0);
+  check('без согласия файл recap.txt всё равно удалён', !fs.existsSync(path.join(home, 'recap.txt')));
+  server.close();
+}
+{
+  // в базе ещё нет колонки recap (миграция не применена): сервер отвечает 400, запись не теряется
+  const picky = await startServer((req, res) => { res.statusCode = JSON.parse(picky.received.at(-1).body).recap !== undefined ? 400 : 201; res.end(); });
+  const home = tempHome(); setConfig(home, { share: true, student_name: 'Тест' });
+  fs.writeFileSync(path.join(home, 'recap.txt'), 'Ученик делал сайт');
+  await runSessionEnd(home, picky.url, writeTranscript(home));
+  check('400 из-за recap: повтор без recap, запись дошла', picky.received.length === 2 && !('recap' in JSON.parse(picky.received[1].body)) && sentLines(home) === 1);
+  picky.server.close();
+}
+
+// 7б. recap: симлинк и огромный файл не читаются; правка progress.jsonl после session-end не обходит очистку; чужой адрес из окружения игнорируется
+{
+  const { server, received, url } = await startServer(ok);
+  const home = tempHome(); setConfig(home, { share: true, student_name: 'Тест' });
+  const outside = path.join(home, 'outside.txt'); fs.writeFileSync(outside, 'ЧУЖОЙ_ФАЙЛ_МАРКЕР');
+  fs.symlinkSync(outside, path.join(home, 'recap.txt'));
+  await runSessionEnd(home, url, writeTranscript(home));
+  check('recap.txt — симлинк: содержимое чужого файла не уходит', received.length === 1 && !received[0].body.includes('ЧУЖОЙ_ФАЙЛ_МАРКЕР') && !('recap' in JSON.parse(received[0].body)));
+  fs.rmSync(path.join(home, 'recap.txt'), { force: true });
+  fs.writeFileSync(path.join(home, 'recap.txt'), 'Ученик делал сайт. '.repeat(2000));
+  await runSessionEnd(home, url, writeTranscript(home));
+  check('recap.txt больше 8 КБ не читается', !('recap' in JSON.parse(received[1].body)));
+  server.close();
+}
+{
+  const { server, received, url } = await startServer(ok);
+  const home = tempHome(); setConfig(home, { share: true, student_name: 'Тест' });
+  const tampered = JSON.stringify({ v: 1, consent: true, os: 'linux', lesson: 2, prompts: 1, tools: {}, categories: [], errors: [], stuck: false, file_types: {}, recap: 'Написал boss@example.com и +996 555 123 456 ' + '😀'.repeat(300) });
+  fs.writeFileSync(path.join(home, 'progress.jsonl'), tampered + '\n');
+  await runSessionEnd(home, url, writeTranscript(home));
+  const row = JSON.parse(received[0].body);
+  check('recap из подправленного progress.jsonl чистится при отправке', !row.recap.includes('boss@example.com') && !row.recap.includes('555 123 456'));
+  check('recap режется по символам, суррогатные пары целы', Array.from(row.recap).length <= 400 && !/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(row.recap));
+  server.close();
+}
+{
+  // чужой (не локальный) адрес из окружения не принимается: берётся настоящий REPORT_URL (в тесте сеть не трогаем)
+  const { resolveReportUrl } = await import('../plugins/ii-ramis/scripts/report.mjs');
+  const { REPORT_URL } = await import('../plugins/ii-ramis/scripts/report-config.mjs');
+  check('IIRAMIS_REPORT_URL с чужим адресом игнорируется', resolveReportUrl('https://evil.example.com/x') === REPORT_URL && resolveReportUrl('http://127.0.0.1.evil.com/x') === REPORT_URL);
+  check('IIRAMIS_REPORT_URL на localhost принимается (для тестов)', resolveReportUrl('http://127.0.0.1:5555/rest/v1/sessions') === 'http://127.0.0.1:5555/rest/v1/sessions');
+}
+
 // 8. install_id создаётся при установке и хранится в config.json
 {
   const home = tempHome();

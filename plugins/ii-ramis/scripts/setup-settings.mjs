@@ -4,17 +4,17 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import crypto from 'node:crypto';
-import { agentContext } from './agent-context.mjs';
 
-// Версия, с которой ставится плагин: тег релиза, а не ветка main. Обновление на новую версию делается вручную (см. README).
-export const RELEASE_TAG = 'v1.0.2';
+// Тег релиза: с него качается сам установщик (фраза ученика не меняется от каждого пуша).
+export const RELEASE_TAG = 'v1.0.3';
+// Маркетплейс плагина следит за веткой stable: туда владелец кладёт только проверенные релизы, main это рабочая ветка.
+export const CHANNEL_REF = 'stable';
 
 const KNOWN_MARKETPLACES = {
   'claude-plugins-official': { source: 'github', repo: 'anthropics/claude-plugins-official' },
   thedotmack: { source: 'github', repo: 'thedotmack/claude-mem' },
   ecc: { source: 'github', repo: 'affaan-m/ECC' },
-  'ii-ramis': { source: 'github', repo: 'RamisGit-cyber/ii-ramis', ref: RELEASE_TAG },
+  'ii-ramis': { source: 'github', repo: 'RamisGit-cyber/ii-ramis', ref: CHANNEL_REF },
 };
 
 const KNOWN_MCP = {
@@ -26,12 +26,10 @@ const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
 const values = (flag) => args.flatMap((a, i) => (a === flag && args[i + 1] ? [args[i + 1]] : []));
 const log = [];
-const agentReason = agentContext(); // не null: нас запустил Claude, а не человек в терминале
 
 const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const settingsFile = path.join(claudeDir, 'settings.json');
 const mcpFile = process.env.CLAUDE_CONFIG_DIR ? path.join(claudeDir, '.claude.json') : path.join(os.homedir(), '.claude.json');
-const dataDir = process.env.IIRAMIS_HOME || path.join(os.homedir(), '.ii-ramis');
 
 function readJson(file) {
   try {
@@ -56,15 +54,17 @@ function marketplaceSource(name) {
     const custom = process.env.IIRAMIS_MARKETPLACE_SOURCE;
     return /^([/.~]|[A-Za-z]:[\\/])/.test(custom)
       ? { source: 'directory', path: path.resolve(custom) }
-      : { source: 'github', repo: custom };
+      : (() => {
+          const [repo, ref] = custom.split('#');
+          return ref ? { source: 'github', repo, ref } : { source: 'github', repo };
+        })();
   }
   return KNOWN_MARKETPLACES[name];
 }
 
 // Режим «без вопросов» (bypass) НИКАКОЙ наш скрипт не включает: только сам ученик (тумблер Settings -> Code ->
 // «Allow bypass permissions mode» в Claude Desktop или правка settings.json руками, см. README).
-// Согласие на сводки (--share yes, --student-name) принимается только от живого человека: stdin и stdout — терминал, Claude не родитель.
-const humanTerminal = !agentReason && Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY);
+// Согласие на пересказы сессий этот скрипт тоже не трогает: его спрашивает ИИ Рамис в чате (см. навык ii-ramis).
 
 function updateSettings() {
   const before = readJson(settingsFile);
@@ -78,12 +78,19 @@ function updateSettings() {
     if (!existing) {
       settings.extraKnownMarketplaces[name] = { source };
       log.push(`маркетплейс ${name} добавлен в настройки`);
+    } else if (name === 'ii-ramis' && JSON.stringify(existing.source) !== JSON.stringify(source)) {
+      // Ученик с v1.0.2 сидит на теге. Источник переводим на stable, остальные поля записи (autoUpdate и т.п.) сохраняем.
+      // Без этого `claude plugin marketplace add` с другим ref отказывает: источник не совпадает с записью в настройках.
+      settings.extraKnownMarketplaces[name] = { ...existing, source };
+      log.push(`маркетплейс ${name}: источник переведён на ${source.ref || source.path || source.repo}`);
     }
   }
   for (const name of values('--auto-update')) {
     const entry = settings.extraKnownMarketplaces[name];
     if (!entry) throw new Error(`Нельзя включить автообновление: маркетплейса ${name} нет в настройках`);
-    if (entry.autoUpdate !== true) {
+    if (entry.autoUpdate === false) {
+      log.push(`автообновление для ${name} выключено учеником, не трогаю`);
+    } else if (entry.autoUpdate !== true) {
       entry.autoUpdate = true;
       log.push(`автообновление для ${name} включено`);
     }
@@ -123,29 +130,10 @@ function updateMcp() {
   save(mcpFile, data, before);
 }
 
-function updateConfig() {
-  const share = values('--share')[0];
-  const studentName = values('--student-name')[0];
-  if (share === undefined && studentName === undefined) return;
-  if (!humanTerminal && (share === 'yes' || studentName !== undefined)) {
-    // Согласие на сводки даёт человек, а не команда из чата. «no» безопасно и разрешено откуда угодно.
-    const why = agentReason ? `скрипт запущен из Claude (${agentReason})` : 'нет живого терминала (ввод или вывод перенаправлены)';
-    log.push(`согласие на отправку итогов Рамису НЕ записано: ${why}. Согласие даёшь только ты сам, в обычном окне Терминала.`);
-    if (share !== 'no') return;
-  }
-  const file = path.join(dataDir, 'config.json');
-  const before = readJson(file);
-  const config = { student_id: crypto.randomUUID(), lesson: null, autosave: true, ...before };
-  if (share !== undefined) config.share = share === 'yes';
-  if (studentName !== undefined && humanTerminal) config.student_name = studentName;
-  if (save(file, config, before)) log.push(`отправка Рамису: ${config.share ? 'разрешена' : 'выключена'}`);
-}
-
 try {
   if (args.includes('--ask-bypass') || args.includes('--bypass')) log.push('режим «без вопросов» скрипты не включают. Включи сам: Claude Desktop -> Settings -> Code -> «Allow bypass permissions mode» (инструкция в README)');
   updateSettings();
   updateMcp();
-  updateConfig();
   const prefix = dryRun ? '[проба, ничего не записано] ' : '';
   console.log(log.length > 0 ? log.map((line) => `${prefix}${line}`).join('\n') : 'настройки уже в порядке, менять нечего');
 } catch (error) {
