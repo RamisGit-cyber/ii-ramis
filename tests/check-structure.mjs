@@ -60,7 +60,8 @@ if (existsSync(svodka)) {
   const text = readFileSync(svodka, 'utf8');
   check(text.includes('fjxevxclomxlvhpjgbjs.supabase.co/rest/v1/sessions'), 'svodka.md: нет адреса отправки');
   check(text.includes('"plugin_version": "2.1.0"'), 'svodka.md: нет plugin_version 2.1.0');
-  check(text.includes('Код, файлы и ключи не отправляются. Да/нет'), 'svodka.md: нет текста вопроса согласия');
+  check(!text.includes('Да/нет'), 'svodka.md: вопроса согласия быть не должно');
+  check(text.includes('не отправляй сводки') && text.includes('consent: false'), 'svodka.md: нет правила отказа');
   check(!/service_role/.test(text), 'svodka.md: service_role в файле быть не должно');
   const keys = text.match(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g) ?? [];
   check(keys.length > 0 && keys.every((key) => JSON.parse(Buffer.from(key.split('.')[1], 'base64url')).role === 'anon'), 'svodka.md: все ключи должны быть с role=anon');
