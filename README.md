@@ -6,6 +6,14 @@
 
 > Идея и часть подхода: [vibe-coding-mentor](https://github.com/AzamatRaimbekov/vibe-coding-mentor) Азамата Раймбекова, лицензия MIT. См. `NOTICE.md`.
 
+## Установка одной строкой (рекомендуется)
+
+Скажи Claude (вкладка Code):
+
+> Установи ИИ Рамиса: запусти `npx -y skills add RamisGit-cyber/ii-ramis --skill ii-ramis -a claude-code -g -y` и скажи, когда готово.
+
+Потом перезапусти Claude и напиши «ИИ Рамис, привет». ИИ Рамис сам проверяет обновления при каждом приветствии.
+
 ## Установка
 
 Нужно: macOS или Windows, приложение Claude Desktop (claude.ai/download), подписка Claude Pro. Открой вкладку **Code**, выбери любую папку и вставь в чат эту фразу:
