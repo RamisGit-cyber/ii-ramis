@@ -11,7 +11,7 @@
 Нужно: macOS или Windows, приложение Claude Desktop (claude.ai/download), подписка Claude Pro. Открой вкладку **Code**, выбери любую папку и вставь в чат эту фразу:
 
 ```
-Установи плагин ИИ Рамис: выполни /plugin marketplace add RamisGit-cyber/ii-ramis, потом /plugin install ii-ramis@ii-ramis, и скажи, когда закончишь.
+Установи плагин ИИ Рамис: запусти claude plugin marketplace add RamisGit-cyber/ii-ramis, потом claude plugin install ii-ramis@ii-ramis и скажи, когда закончишь. (В Claude Desktop, вкладка Code, после этого перезапусти приложение.)
 ```
 
 Если Claude не может выполнить слэш-команды сам, вставь их по очереди в поле ввода (каждую отдельным сообщением):
@@ -30,7 +30,7 @@
 Если включено автообновление (по умолчанию так и есть), версия 2.0 подтянется сама при следующем запуске Claude Code, когда автор её выпустит. Если автообновление ты выключал, вставь в чат Claude Code:
 
 ```
-Обнови плагин ИИ Рамис до версии 2.0: выполни /plugin marketplace update ii-ramis, потом /plugin update ii-ramis@ii-ramis, и скажи, когда закончишь.
+Обнови плагин ИИ Рамис до версии 2.0: запусти claude plugin marketplace update ii-ramis, потом claude plugin update ii-ramis@ii-ramis и скажи, когда закончишь. Потом перезапусти Claude. В Claude Desktop можно и мышкой: кнопка «+» у поля ввода → Manage plugins → ii-ramis → Update.
 ```
 
 Слэш-команды `/plugin` старая защита не блокирует: она проверяла только вызовы инструментов, а не команды плагинов. После обновления закрой сессию и открой заново. Хуки 1.0.x в новой версии не работают: Claude Code берёт хуки из папки установленной версии плагина, а в 2.0 их нет.
