@@ -28,7 +28,9 @@ export function commandIndex(tokens) {
   while (i < tokens.length) {
     const token = tokens[i];
     const name = verbName(token);
-    if (isAssignment(token) || KEYWORDS.has(name)) { i += 1; continue; }
+    // `select` в PowerShell (Select-Object) это команда; ключевое слово только в цикле bash «select имя in …»
+    const isKeyword = KEYWORDS.has(name) && (name !== 'select' || tokens[i + 2] === 'in');
+    if (isAssignment(token) || isKeyword) { i += 1; continue; }
     if (WRAPPERS.has(name)) {
       i += 1;
       while (i < tokens.length) {
@@ -137,6 +139,7 @@ function parseInto(src, mode, depth, out) {
             if (line.trim() === delimiter) break;
             lines.push(line);
           }
+          lineCommands.forEach((lineCommand) => { (lineCommand.heredocBodies ||= []).push(lines.join('\n')); });
           if (runsAsCode) parseInto(lines.join('\n'), mode, depth + 1, out);
         }
       }

@@ -1,0 +1,28 @@
+Bash|claude plugin details x@y
+Bash|claude plugin list
+Bash|claude plugin list; touch /tmp/p
+Bash|cp a /tmp/claude-501/b
+Bash|echo hi > "$TMPDIR/claude-501/x.txt"
+Bash|echo hi > $TMPDIR/claude-501/x.txt
+Bash|echo hi > .mcp.json
+Bash|echo hi > /private/tmp/claude-501/x.txt
+Bash|echo hi > /tmp/claude-1001/work/x.txt
+Bash|echo hi > /tmp/claude-501/hooks/a
+Bash|echo hi > /tmp/claude-501/plugins/a
+Bash|echo hi > /tmp/claude-501/settings.json
+Bash|echo hi > ~/.claude.json.bak
+Bash|echo hi > ~/.claude/.mcp.json
+Bash|echo hi > ~/.claude/CLAUDE.md
+Bash|echo hi > ~/.claude/agents/x.md
+Bash|echo hi > ~/.claude/commands/x.md
+Bash|echo hi > ~/.claude/keybindings.json
+Bash|echo hi > ~/.claude/output-styles/x
+Bash|echo hi > ~/.claude/projects/x
+Bash|echo hi > ~/.claude/skills/x/SKILL.md
+Bash|echo hi > ~/.claude/statusline.sh
+Bash|env ${a}ME=/tmp cat $HOME/x
+Bash|mkdir -p /tmp/claude-501/a && touch /tmp/claude-501/a/b
+Bash|node "${CLAUDE_PLUGIN_ROOT}/scripts/config.mjs" show
+PowerShell|Get-ChildItem $env:USERPROFILE -Recurse | Select-Object -First 5
+PowerShell|Get-Content $env:USERPROFILE\Documents\a.txt
+PowerShell|gci -Recurse | Select-String x | Out-Host

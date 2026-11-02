@@ -50,10 +50,17 @@ const WRAPPERS = '(?:env|sudo|doas|nohup|exec|command|time|npx|bunx|pnpm|yarn|np
 const CLAUDE_TAIL = '(?:[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+)*(?:' + WRAPPERS + '\\s+(?:\\S+\\s+){0,4}?)*(?:[^\\s"\'`;&|()]*[/\\\\])?claude(?:\\.exe|-code)?(?![\\w.-])([^;&|\\n]*)';
 // начало команды (после ; & | ( или $( ) либо открывающая кавычка после флага -c / -Command / /c / send-keys / spawn
 const CLAUDE_LAUNCH = new RegExp('(?:^|[;&|(`\\n]|\\$\\()\\s*' + CLAUDE_TAIL + '|(?:-[a-z]*c|-command|/c|send-keys|spawn)\\s+["\']\\s*' + CLAUDE_TAIL, 'gi');
+// Разрешено из Claude: просмотр плагинов, подключение и удаление коннекторов (claude mcp add/remove/list/get: ученики подключают коннекторы).
+// `claude mcp add` с командой, которая трогает защищаемое (настройки .claude, ключи, окружение, удаление домашней папки), закрыт ниже.
+const MCP_COMMAND_PROTECTED = /\.claude|\.ii-ramis|ii-ramis|managed-settings|\.ssh|\.aws|\.gnupg|\.npmrc|\.netrc|id_rsa|id_ed25519|keychain|security\s+find|environ|process\.env|\bprintenv\b|\.env\b|credentials|CLAUDE_CONFIG_DIR|rm\s+-[a-z]*r|rmtree|rmSync|Remove-Item|\bsudo\b/i;
+const ALLOWED_CLAUDE = /^(?:mcp\s+(?:list|get\s+\S+|add(?:-json|-from-claude-desktop)?(?:\s+.+)?|remove\s+\S+)|plugins?\s+list(?:\s+--(?:json|available))*|plugins?\s+marketplaces?\s+list(?:\s+--json)?|plugins?\s+details\s+[A-Za-z0-9@._-]{1,80})$/;
+// Установка самого Claude Code через пакетный менеджер (npm i -g @anthropic-ai/claude-code) запуском claude не является.
+const PACKAGE_INSTALL = /\b(?:npm|pnpm|yarn|bun)\s+(?:i|install|add|update|upgrade|uninstall|remove|rm)\s+(?:-{1,2}[\w-]+(?:=\S+)?\s+)*@anthropic-ai\/claude-code(?:@[\w.-]+)?/gi;
 export function isClaudeLaunch(commandText) {
-  for (const match of String(commandText).matchAll(CLAUDE_LAUNCH)) {
+  for (const match of String(commandText).replace(PACKAGE_INSTALL, 'package-install').matchAll(CLAUDE_LAUNCH)) {
     const rest = (match[1] || match[2] || '').trim().replace(/["']+$/, '');
-    if (!/^(?:--version|-v)$/.test(rest)) return true;
+    if (!/^(?:--version|-v)$/.test(rest) && !ALLOWED_CLAUDE.test(rest)) return true;
+    if (/^mcp\s+add/.test(rest) && MCP_COMMAND_PROTECTED.test(rest)) return true;
   }
   return false;
 }
@@ -116,4 +123,20 @@ export function checkConsentCommand(commands, commandText = '') {
     if (isStudentNameSet(cmd.tokens) && !nameMayBeSet()) return NAME_REASON;
   }
   return null;
+}
+
+// `claude mcp add`: без вопросов только удалённые коннекторы (--transport http|sse https://…) и известные пакеты через npx.
+// Всё остальное (своя команда, add-json, add-from-claude-desktop) не блок, а обычный вопрос ученику: охранник отвечает «спросить» (см. guard.mjs).
+const MCP_FLAGS = String.raw`(?:(?:--scope|-s)\s+(?:user|project|local)\s+|--transport\s+(?:http|sse)\s+|(?:-H|--header)\s+"[\w-]+: [^"\x60$;&|<>()]*"\s+|(?:-e|--env)\s+[A-Z][A-Z0-9_]*=[\w.:/-]*\s+)*`;
+const MCP_NAME = String.raw`[\w.-]{1,60}`;
+const MCP_REMOTE = new RegExp(String.raw`^mcp\s+add\s+${MCP_FLAGS}${MCP_NAME}\s+${MCP_FLAGS}https:\/\/[^\s"'\x60$;&|()<>]+(?:\s+${MCP_FLAGS.slice(0, -1)})*\s*$`);
+const MCP_KNOWN_PACKAGE = String.raw`(?:@modelcontextprotocol\/[\w.-]+|@upstash\/context7-mcp|@playwright\/mcp|@supabase\/mcp-server-supabase|@vercel\/mcp-adapter|@notionhq\/notion-mcp-server|@figma\/mcp)(?:@[\w.-]+)?`;
+const MCP_STDIO = new RegExp(String.raw`^mcp\s+add\s+${MCP_FLAGS}${MCP_NAME}\s+${MCP_FLAGS}--\s+npx\s+(?:-y\s+)?${MCP_KNOWN_PACKAGE}(?:\s+[\w.:=/@-]+)*\s*$`);
+
+export function mcpAddNeedsConfirmation(commandText) {
+  for (const match of String(commandText).replace(PACKAGE_INSTALL, 'package-install').matchAll(CLAUDE_LAUNCH)) {
+    const rest = (match[1] || match[2] || '').trim().replace(/["']+$/, '');
+    if (/^mcp\s+add/.test(rest) && !(MCP_REMOTE.test(rest) && /--transport\s+(?:http|sse)\b/.test(rest)) && !MCP_STDIO.test(rest)) return true;
+  }
+  return false;
 }

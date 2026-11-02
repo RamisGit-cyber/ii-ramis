@@ -1,0 +1,23 @@
+$n='USERPR'+'OFILE'; Set-Item "env:$n" "$env:USERPROFILE\.claude"; Set-Content "$env:USERPROFILE\settings.json" '{}'
+$n='USERPR'+'OFILE'; [Environment]::SetEnvironmentVariable($n,"C:\x"); Get-Content $env:USERPROFILE\a.txt
+Get-Content $env:USERPROFILE\Documents\a.txt
+Get-Content $env:USERPROFILE\.claude\settings.json | Out-File $env:USERPROFILE\.claude\settings.json
+Get-Content ${env:CLAUDE_PLUGIN_ROOT}\hooks\hooks.json | Out-File x.txt
+Get-ChildItem $env:USERPROFILE -Recurse | Select-Object -First 5
+Get-ChildItem $env:USERPROFILE\.ii-ramis | Set-Content $env:USERPROFILE\.ii-ramis\config.json
+Get-Content $env:USERPROFILE\.ii-ramis\config.json | Select-String x | Out-File $env:USERPROFILE\.ii-ramis\config.json
+Get-Content $env:USERPROFILE\.ii-ramis\config.json | Format-Table | Out-File C:\t.txt
+Get-Content $env:USERPROFILE\.ii-ramis\config.json | Out-String
+Get-Content $env:USERPROFILE\.ii-ramis\config.json | Select-Object -First 1 | iex
+Get-Content $env:USERPROFILE\.ii-ramis\config.json | Select-String x | Invoke-Expression
+Get-Content $env:USERPROFILE\.ii-ramis\config.json | Sort-Object -Unique | Set-Content C:\t.txt
+Get-Content $env:USERPROFILE\.ii-ramis\config.json | Select-Object -First 1 | Tee-Object C:\t.txt
+Get-Content $env:USERPROFILE\.ii-ramis\config.json | Measure-Object | Export-Csv C:\t.csv
+Get-Content $env:USERPROFILE\.ii-ramis\config.json | Format-Table | Out-File -FilePath C:\t.txt
+Get-Content $env:USERPROFILE\.ii-ramis\config.json | Out-String | Set-Clipboard
+Get-Content $env:USERPROFILE\.ii-ramis\config.json | Select-String x -OutVariable q
+Get-Content $env:USERPROFILE\.ii-ramis\config.json | Sort-Object | Select-Object -Property @{n='a';e={iex $_}}
+Get-Content $env:USERPROFILE\.ii-ramis\config.json | Select-Object @{n='a';e={Remove-Item C:\x}}
+Get-Content $env:USERPROFILE\.ii-ramis\config.json | Sort-Object {Set-Content C:\t.txt 1}
+gci $env:USERPROFILE -Recurse -Filter *.json | Select-String password
+gci -Recurse | Select-String x | Out-Host

@@ -1,0 +1,33 @@
+echo hi > /private/tmp/claude-501/x.txt
+echo hi > /tmp/claude-1001/work/x.txt
+echo hi > $TMPDIR/claude-501/x.txt
+echo hi > "$TMPDIR/claude-501/x.txt"
+mkdir -p /tmp/claude-501/a && touch /tmp/claude-501/a/b
+cp a /tmp/claude-501/b
+echo hi > /tmp/claude-501/.claude/settings.json
+echo hi > /tmp/x/.claude/settings.json
+echo hi > /tmp/x/.claude/settings.local.json
+echo hi > ./.claude/settings.json
+echo hi > /tmp/claude-501/.claude.json
+echo hi > /tmp/x/.claude/hooks/a.sh
+echo hi > /tmp/x/.claude/plugins/a
+echo hi > /tmp/claude-501/plugins/a
+echo hi > /tmp/claude-501/hooks/a
+echo hi > /tmp/claude-501/settings.json
+echo hi > ~/.claude/CLAUDE.md
+echo hi > ~/.claude/commands/x.md
+echo hi > ~/.claude/agents/x.md
+echo hi > ~/.claude/skills/x/SKILL.md
+echo hi > ~/.claude/projects/x
+echo hi > ~/.claude/keybindings.json
+echo hi > ~/.claude/statusline.sh
+echo hi > ~/.claude/output-styles/x
+echo hi > ~/.claude/.mcp.json
+echo hi > ~/.claude.json.bak
+echo hi > ~/.claude/managed-settings.json
+echo hi > ~/Library/Application\ Support/ClaudeCode/managed-settings.json
+echo hi > /etc/claude-code/managed-settings.json
+echo hi > /Library/Application\ Support/ClaudeCode/managed-settings.json
+echo hi > .mcp.json
+echo hi > ./.claude/settings.local.json
+echo hi > $CLAUDE_CONFIG_DIR/settings.json

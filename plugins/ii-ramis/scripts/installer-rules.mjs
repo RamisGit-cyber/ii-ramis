@@ -84,11 +84,18 @@ const PTY_WORDS = /(^|[^A-Za-z])(pty|ptyprocess|pexpect|node-pty|conpty|winpty|f
 const TTY_DEVICES = /\/dev\/(tty|pts|ptmx)/i;
 const TERMINAL_REASON = 'обёртка с псевдотерминалом или запуск в отдельном окне терминала (script, expect, unbuffer, socat, tmux, osascript, python pty, /dev/tty): так можно выдать себя за человека, а согласия даёт только человек';
 
+// osascript -e 'display notification "Готово"': просто уведомление; tell application, do script, keystroke не пропускаем.
+function isHarmlessOsascript(tokens, first) {
+  if (verbName(tokens[first]) !== 'osascript') return false;
+  const args = tokens.slice(first + 1);
+  return args.length >= 2 && args.length % 2 === 0 && args.every((t, i) => (i % 2 === 0 ? t === '-e' : /^display (?:notification|dialog) "[^"`$]*"(?: with title "[^"`$]*")?(?: subtitle "[^"`$]*")?$/.test(t) || /^(?:beep|set volume \d+)$/.test(t)));
+}
+
 export function checkTerminalWrappers(commands) {
   for (const cmd of commands) {
     const { tokens } = cmd;
     const first = commandIndex(tokens);
-    if (first !== -1 && TERMINAL_DRIVER_VERBS.has(verbName(tokens[first]))) return TERMINAL_REASON;
+    if (first !== -1 && TERMINAL_DRIVER_VERBS.has(verbName(tokens[first])) && !isHarmlessOsascript(tokens, first)) return TERMINAL_REASON;
     const name = first === -1 ? '' : verbName(tokens[first]);
     const textOnly = (HARMLESS_MARKER_VERBS.has(name) && !cmd.inSubstitution) || name === 'git' || name === 'gh';
     const scanned = textOnly ? withoutMessageText(tokens) : tokens;

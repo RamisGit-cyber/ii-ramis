@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 // Тег релиза: с него качается сам установщик (фраза ученика не меняется от каждого пуша).
-export const RELEASE_TAG = 'v1.0.3';
+export const RELEASE_TAG = 'v1.0.5';
 // Маркетплейс плагина следит за веткой stable: туда владелец кладёт только проверенные релизы, main это рабочая ветка.
 export const CHANNEL_REF = 'stable';
 

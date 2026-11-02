@@ -1,0 +1,60 @@
+cat $HOME/.ii-ramis/config.json
+cat $HOME/.ii-ramis/config.json | head
+cat $HOME/.ii-ramis/config.json | tee /tmp/x
+cat "$HOME/.ii-ramis/config.json" | sh
+cat ~/.ii-ramis/config.json | sort -o ~/.ii-ramis/config.json
+cat ~/.ii-ramis/config.json | sort --output=/tmp/o
+cat ~/.ii-ramis/config.json | jq . > /tmp/o
+cat ~/.ii-ramis/config.json | jq -n "input|system(\"id\")"
+cat ~/.ii-ramis/config.json | rg --pre sh x
+cat ~/.ii-ramis/config.json | column -t | tee ~/.ii-ramis/config.json
+find ~/.ii-ramis -name "*.json"
+find ~/.ii-ramis -name x -exec cat {} +
+find ~/.ii-ramis -name x -fprintf /tmp/o %p
+find ~/.ii-ramis -name x -FPRINT /tmp/o
+find ~/.ii-ramis -type f | sh
+find ~/.ii-ramis -name x | xargs cat
+find ~/.ii-ramis -name x -print0 | xargs -0 cat
+find ~/.ii-ramis -name x -execdir sh {} ;
+find ~/.ii-ramis -name x -ok sh {} ;
+find ~/.ii-ramis -fprint /tmp/o
+find ~/.ii-ramis -name x -fls /tmp/o
+find ~/.ii-ramis -name x -newer a -fprint0 /tmp/o
+tree ~/.ii-ramis -o /tmp/o
+du ~/.ii-ramis --files0-from=x
+cat ~/.ii-ramis/config.json | head $(touch /tmp/p)
+cat ~/.ii-ramis/config.json | head `id`
+cat ~/.ii-ramis/config.json | awk "BEGIN{system(\"id\")}"
+HOME=/tmp/z; cat $HOME/.ii-ramis/config.json
+cat ${HOME:-x}/.ii-ramis/config.json
+sort ~/.ii-ramis/config.json -o ~/.ii-ramis/config.json
+node "${CLAUDE_PLUGIN_ROOT}/scripts/config.mjs" show
+node "${CLAUDE_PLUGIN_ROOT}/scripts/config.mjs" get x | sh
+node "${CLAUDE_PLUGIN_ROOT}/scripts/config.mjs" show > ~/.ii-ramis/config.json
+node "${CLAUDE_PLUGIN_ROOT}/scripts/config.mjs" get student_id
+claude plugin list
+claude plugin list; touch /tmp/p
+claude mcp list | sh
+claude plugin details a --x
+claude plugin details x@y
+claude mcp list --json
+claude plugin details $(id)
+claude plugin details evil@x --help
+cat $HOME/.ii-ramis/config.json | uniq ~/.ii-ramis/config.json
+cat $HOME/.ii-ramis/config.json | sort -k1 --compress-program=sh
+cat $HOME/.ii-ramis/config.json | less +!id
+cat $HOME/.ii-ramis/config.json | tr -d x | tee -a /tmp/x
+cat $HOME/.ii-ramis/config.json | cut -c1-5 | nl > /tmp/o
+cat $HOME/.ii-ramis/config.json | sort -T /tmp -o /tmp/q
+cat $HOME/.ii-ramis/config.json | sort -o/tmp/q
+cat $HOME/.ii-ramis/config.json | sort -ro /tmp/q
+cat $HOME/.ii-ramis/config.json | uniq - /tmp/q
+cat $HOME/.ii-ramis/config.json | uniq /dev/stdin /tmp/q
+cat $HOME/.ii-ramis/config.json | tr x y > /tmp/q
+cat $HOME/.ii-ramis/config.json | nl|tee /tmp/q
+cat $HOME/.ii-ramis/config.json | head -n1 &
+cat $HOME/.ii-ramis/config.json | jq --from-file /tmp/prog.jq
+cat $HOME/.ii-ramis/config.json | rg x --hostname-bin=sh
+cat $HOME/.ii-ramis/config.json | grep x -f /tmp/q
+cat $HOME/.ii-ramis/config.json | sort --compress-program sh
+cat $HOME/.ii-ramis/config.json | nl; cat /tmp/x
