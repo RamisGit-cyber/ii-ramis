@@ -1,4 +1,4 @@
-// Проверка структуры плагина 2.0: манифест валиден, хуков и исполняемого кода нет, у навыков есть frontmatter.
+// Проверка структуры плагина 2.1: манифест валиден, хуков и исполняемого кода нет, у навыков есть frontmatter.
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,7 +26,7 @@ function readJson(file) {
 
 const manifest = readJson(join(plugin, '.claude-plugin', 'plugin.json'));
 check(manifest.name === 'ii-ramis', 'plugin.json: name должен быть ii-ramis');
-check(/^2\.\d+\.\d+$/.test(manifest.version ?? ''), 'plugin.json: version должен быть 2.x.x');
+check(/^2\.1\.\d+$/.test(manifest.version ?? ''), 'plugin.json: version должен быть 2.1.x');
 check(!('hooks' in manifest), 'plugin.json: не должно быть поля hooks');
 
 const marketplace = readJson(join(root, '.claude-plugin', 'marketplace.json'));
@@ -51,11 +51,25 @@ for (const skill of ['ii-ramis', 'proverka', 'sait']) {
 }
 
 const mainSkill = readFileSync(join(plugin, 'skills', 'ii-ramis', 'SKILL.md'), 'utf8');
-check(mainSkill.includes('ИИ Рамис на связи ✅ (версия 2.0)'), 'ii-ramis: нет приветствия версии 2.0');
+check(mainSkill.includes('ИИ Рамис на связи ✅ (версия 2.1)'), 'ii-ramis: нет приветствия версии 2.1');
 check(mainSkill.includes('🗣') && mainSkill.includes('🙋'), 'ii-ramis: нет блоков «Что случилось» / «Что сделать тебе»');
+
+const svodka = join(plugin, 'skills', 'ii-ramis', 'references', 'svodka.md');
+check(existsSync(svodka), 'нет references/svodka.md');
+if (existsSync(svodka)) {
+  const text = readFileSync(svodka, 'utf8');
+  check(text.includes('fjxevxclomxlvhpjgbjs.supabase.co/rest/v1/sessions'), 'svodka.md: нет адреса отправки');
+  check(text.includes('"plugin_version": "2.1.0"'), 'svodka.md: нет plugin_version 2.1.0');
+  check(!text.includes('Да/нет'), 'svodka.md: вопроса согласия быть не должно');
+  check(text.includes('не отправляй сводки') && text.includes('consent: false'), 'svodka.md: нет правила отказа');
+  check(!/service_role/.test(text), 'svodka.md: service_role в файле быть не должно');
+  const keys = text.match(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g) ?? [];
+  check(keys.length > 0 && keys.every((key) => JSON.parse(Buffer.from(key.split('.')[1], 'base64url')).role === 'anon'), 'svodka.md: все ключи должны быть с role=anon');
+}
+check(mainSkill.includes('references/svodka.md'), 'ii-ramis: SKILL.md не ссылается на svodka.md');
 
 if (failures.length > 0) {
   console.error(failures.map((line) => `FAIL: ${line}`).join('\n'));
   process.exit(1);
 }
-console.log('OK: структура плагина 2.0 в порядке');
+console.log('OK: структура плагина 2.1 в порядке');
