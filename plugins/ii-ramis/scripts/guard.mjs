@@ -31,11 +31,15 @@ try {
   if (!raw.trim()) throw new Error('пустой ввод хука');
   const input = JSON.parse(raw);
   if (!input || typeof input !== 'object') throw new Error('ввод хука не объект');
-  const { decide, Denied } = await import('./guard-core.mjs');
+  const { decide, Denied, Ask } = await import('./guard-core.mjs');
   let reason = null;
   try {
     reason = decide(input);
   } catch (error) {
+    if (error instanceof Ask) {
+      process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: `ИИ Рамис: ${error.message}` } }));
+      process.exit(0);
+    }
     if (!(error instanceof Denied)) throw error;
     reason = error.message;
   }

@@ -2,6 +2,7 @@
 import { CONFIG_FILE, loadConfig, writeJson } from './lib.mjs';
 
 const [action, key, ...rest] = process.argv.slice(2);
+const HIDDEN_KEYS = ['student_id', 'install_id'];
 const ALLOWED_KEYS = ['lesson', 'share', 'autosave', 'student_name', 'checked', 'share_asked'];
 
 function parseValue(raw) {
@@ -13,8 +14,12 @@ function parseValue(raw) {
 
 const config = loadConfig();
 if (action === 'show' || !action) {
-  console.log(JSON.stringify({ ...config, student_id: '(скрыт)' }, null, 2));
+  console.log(JSON.stringify({ ...config, student_id: '(скрыт)', install_id: '(скрыт)' }, null, 2));
 } else if (action === 'get' && key) {
+  if (HIDDEN_KEYS.includes(key)) {
+    console.error(`Ключ "${key}" служебный, его значение не показываем.`);
+    process.exit(1);
+  }
   console.log(config[key] ?? '');
 } else if (action === 'set' && key && rest.length > 0) {
   if (!ALLOWED_KEYS.includes(key)) {

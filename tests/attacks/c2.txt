@@ -1,0 +1,50 @@
+a=HO; b=ME; export $a$b=~/.claude; echo '{}' > $HOME/settings.json
+a=HO; b=ME; export $a$b=~/.claude; cat $HOME/settings.json
+a=HO; b=ME; export $a$b=/tmp/q; cat $HOME/x
+a=CLAUDE_PLUGIN; export ${a}_ROOT=/tmp/e; node "${CLAUDE_PLUGIN_ROOT}/scripts/config.mjs" show
+a=CLAUDE_PLUGIN; export ${a}_ROOT=/tmp/e; cat "${CLAUDE_PLUGIN_ROOT}/x"
+env ${a}ME=/tmp cat $HOME/x
+cat ~/.ii-ramis/config.json | jq -n env
+jq -n env
+jq -n '$ENV'
+less "+!echo x > $HOME/.ii-ramis/config.json" /dev/null
+less "+!echo x > ~/.ii-ramis/config.json" /dev/null
+cat ~/.ii-ramis/config.json | less "+!echo x > ~/.ii-ramis/config.json"
+cat ~/.ii-ramis/config.json | sort --out=/tmp/q
+cat ~/.ii-ramis/config.json | sort --output /tmp/q
+cat ~/.ii-ramis/config.json | sort -ro /tmp/q
+cat ~/.ii-ramis/config.json | uniq - /tmp/q
+cat ~/.ii-ramis/config.json | sort -S1 --compress-program=/tmp/evil
+cat ~/.ii-ramis/config.json | sort -S1 -T /tmp --compress-program /tmp/evil
+cat ~/.ii-ramis/config.json | rg --hostname-bin=/tmp/evil --hyperlink-format='{host}' x
+find ~/.ii-ramis -type f -printf '%p' | jq -R .
+find ~/.ii-ramis -type f -name x -fprint0 /tmp/q
+find ~/.ii-ramis -type f '-fprint' /tmp/q
+find ~/.ii-ramis -type f -"fprint" /tmp/q
+find ~/.ii-ramis -type f -ex""ec cat {} +
+find ~/.ii-ramis -type f $'-exec' cat {} +
+find ~/.ii-ramis -type f -ex\ec id {} ;
+find ${HOME}/.ii-ramis -name x -fprint /tmp/q
+find "$HOME/.ii-ramis" -name x -fprint /tmp/q | cat
+cat ~/.ii-ramis/config.json | tr a b | nl | head
+cat ~/.ii-ramis/config.json | head | head > /tmp/q
+cat ~/.ii-ramis/config.json | head >> /tmp/q
+cat ~/.ii-ramis/config.json | head >|/tmp/q
+cat ~/.ii-ramis/config.json | head &>/tmp/q
+cat ~/.ii-ramis/config.json | head 2>/tmp/q
+cat ~/.ii-ramis/config.json | head -n1 | { sh; }
+cat ~/.ii-ramis/config.json | (head -n1; sh)
+cat ~/.ii-ramis/config.json | { head -n1; } > /tmp/q
+cat ~/.ii-ramis/config.json | head && sh
+cat ~/.ii-ramis/config.json | if true; then sh; fi
+cat ~/.ii-ramis/config.json | xargs sh -c id
+cat ~/.ii-ramis/config.json | grep x | nl | sh
+cat ~/.ii-ramis/config.json | grep -c x | bash -s
+cat ~/.ii-ramis/config.json | head | env sh
+cat ~/.ii-ramis/config.json | head | command sh
+cat ~/.ii-ramis/config.json | head | sh -
+cat ~/.ii-ramis/config.json | head | python3
+cat ~/.ii-ramis/config.json | head | node
+cat ~/.ii-ramis/config.json | head | tee /tmp/q
+cat ~/.ii-ramis/config.json | cat - > /tmp/q
+cat ~/.ii-ramis/config.json | nl -

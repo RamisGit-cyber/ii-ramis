@@ -1,0 +1,14 @@
+a=HO; b=ME; export $a$b=~/.claude; echo '{}' > $HOME/settings.json
+less "+!echo x > ~/.ii-ramis/config.json" /dev/null
+jq -n env
+cat ~/.ii-ramis/config.json | head &>~/.ii-ramis/config.json
+head ~/.ii-ramis/config.json &>~/.ii-ramis/config.json
+head ~/.ii-ramis/config.json &> ~/.ii-ramis/config.json
+head -n1 ~/.ii-ramis/config.json >& ~/.ii-ramis/config.json
+cat ~/.ii-ramis/config.json | { head -n1; } > ~/.ii-ramis/config.json
+{ head -n1 ~/.ii-ramis/config.json; } > ~/.ii-ramis/config.json
+cat ~/.ii-ramis/config.json | head -n1 | sort -o/tmp/q
+cat ~/.ii-ramis/config.json | sort -ro /tmp/q
+cat ~/.ii-ramis/config.json | sort --out=/tmp/q
+cat ~/.ii-ramis/config.json | sort -S1 --compress-program=/tmp/evil
+cat ~/.ii-ramis/config.json | jq -n env

@@ -1,0 +1,6 @@
+Get-Content a.txt | Select-Object @{n='a';e={Remove-Item C:\x -Recurse}}
+Get-Content a.txt | Sort-Object {Remove-Item C:\x -Recurse}
+Get-Content $env:USERPROFILE\.ii-ramis\config.json | Select-Object @{n='a';e={Remove-Item C:\x}}
+Get-Content $env:USERPROFILE\.ii-ramis\config.json | Sort-Object {Set-Content $env:USERPROFILE\.ii-ramis\config.json 1}
+Get-Content $env:USERPROFILE\.ii-ramis\config.json | Sort-Object {iex 'x'}
+Get-Content $env:USERPROFILE\.ii-ramis\config.json | Sort-Object {Set-Content C:\t.txt 1}

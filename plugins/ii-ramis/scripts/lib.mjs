@@ -160,6 +160,15 @@ function globMayMatchSecret(name) {
   return literal.length >= 3 && SECRET_NAMES.some((file) => regex.test(file));
 }
 
+// Только прямое имя секретного файла, без шаблонов со звёздочкой: для Glob, который лишь перечисляет имена файлов и содержимое не читает.
+export function tokenNamesSecret(token) {
+  try {
+    return expandBraces(token).some((variant) => mentionsSecretPath(variant));
+  } catch {
+    return true;
+  }
+}
+
 // Токен команды упоминает секретный путь: прямо, через раскрытие {a,b} или через шаблон со звёздочкой.
 export function tokenMentionsSecret(token) {
   try {

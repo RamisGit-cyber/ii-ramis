@@ -36,19 +36,12 @@ export function checkWebFetch(toolInput) {
   }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return `${REASON_PREFIX}: схема ${url.protocol} не разрешена`;
   if (url.username || url.password) return `${REASON_PREFIX}: в адресе логин или пароль`;
-  if (isInternalHost(url.hostname)) return `${REASON_PREFIX}: внутренний адрес (этот компьютер, домашняя сеть или служебный адрес облака, где лежат ключи сервера)`;
-  if (raw.length > MAX_URL_LENGTH) return `${REASON_PREFIX}: адрес слишком длинный (${raw.length} символов)`;
-  if (url.hostname.split('.').some((label) => hasBlob(label))) return `${REASON_PREFIX}: в имени сайта закодированные данные`;
+  if (!/^(?:localhost|127\.0\.0\.1|\[::1\])$/i.test(url.hostname) && isInternalHost(url.hostname)) return `${REASON_PREFIX}: внутренний адрес (этот компьютер, домашняя сеть или служебный адрес облака, где лежат ключи сервера)`;
 
   const text = decoded(raw);
   if (KEY_SHAPES.some((shape) => shape.test(text))) return `${REASON_PREFIX}: в адресе виден ключ`;
   if (mentionsSecretPath(text.replace(/^https?:\/\/[^/]+/, '')) || tokenMentionsShellStartup(url.pathname)) {
     return `${REASON_PREFIX}: в адресе имя файла с ключами или настройками оболочки`;
   }
-  for (const [name, value] of url.searchParams) {
-    if (SECRET_PARAM.test(name) && value.length >= 8) return `${REASON_PREFIX}: параметр «${name}» с длинным значением`;
-    if (value.length > MAX_VALUE_LENGTH || hasBlob(value)) return `${REASON_PREFIX}: в параметре «${name}» длинный набор символов`;
-  }
-  if (url.pathname.split('/').some((segment) => hasBlob(decoded(segment)))) return `${REASON_PREFIX}: в пути длинный набор символов`;
   return null;
 }

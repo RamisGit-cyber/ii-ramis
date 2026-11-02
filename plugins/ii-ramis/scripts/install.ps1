@@ -1,6 +1,6 @@
 # Installer of the 'II Ramis' package for Windows (PowerShell). Idempotent: safe to run again.
-# Run:  irm https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/v1.0.4/plugins/ii-ramis/scripts/install.ps1 | iex
-# The installer itself is fetched from an immutable tag (v1.0.4); the plugin follows the stable branch with auto-update on.
+# Run:  irm https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/v1.0.5/plugins/ii-ramis/scripts/install.ps1 | iex
+# The installer itself is fetched from an immutable tag (v1.0.5); the plugin follows the stable branch with auto-update on.
 # This file is ASCII ONLY (Russian strings are built from ~uXXXX codes by function T), so it reads the same via irm | iex
 # and via powershell -File in Windows PowerShell 5.1 without a BOM. The installer never enables bypass mode,
 # and the installer does not ask the session-recap sharing consent: ii-ramis asks it once in the chat on the first greeting.
@@ -18,7 +18,7 @@ function T([string]$Text) {
 }
 if ($env:IIRAMIS_DRYRUN -eq '1') { $DryRun = $true }
 
-$ReleaseTag = 'v1.0.4'
+$ReleaseTag = 'v1.0.5'
 $ChannelRef = 'stable'
 $RawBase = if ($env:IIRAMIS_RAW_BASE) { $env:IIRAMIS_RAW_BASE } else { "https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/$ReleaseTag/plugins/ii-ramis/scripts" }
 $MarketplaceSource = if ($env:IIRAMIS_MARKETPLACE_SOURCE) { $env:IIRAMIS_MARKETPLACE_SOURCE } else { "RamisGit-cyber/ii-ramis#$ChannelRef" }
@@ -37,9 +37,47 @@ function Update-SessionPath {
 function Install-WithWinget([string]$PackageId) {
   if ($DryRun) { Write-Host (T "  [~u043F~u0440~u043E~u0431~u0430] winget install $PackageId"); return $true }
   if (-not (Test-Command 'winget')) { return $false }
-  winget install --id $PackageId -e --silent --accept-package-agreements --accept-source-agreements | Out-Null
+  winget install --id $PackageId -e --source winget --silent --accept-package-agreements --accept-source-agreements | Out-Null
   Update-SessionPath
   return ($LASTEXITCODE -eq 0)
+}
+
+# gh without winget (old Windows 10, winget missing or failing): official zip from github.com/cli/cli, no admin rights.
+# The version is pinned and the SHA256 sums are embedded here (taken from gh_2.103.3_checksums.txt of that release).
+$GhVersion = '2.103.3'
+$GhSha256 = @{
+  'gh_2.103.3_windows_amd64.zip' = '98d0cfa794721665d7973dd728c78aff7bd836d58f10f6d7a03568eccb0a22e0'
+  'gh_2.103.3_windows_arm64.zip' = '197211c98687d7770ac331fe8a3b6c198c389108c1536cdbedf659fe4703e484'
+}
+function Install-GhZip {
+  if ($DryRun) { Write-Host (T "  [~u043F~u0440~u043E~u0431~u0430] download gh $GhVersion zip from github.com/cli/cli"); return $true }
+  try {
+    $ProgressPreference = 'SilentlyContinue'
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
+    $file = "gh_${GhVersion}_windows_${arch}.zip"
+    $expected = $GhSha256[$file]
+    if (-not $expected) { return $false }
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("ii-ramis-gh-" + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+    Invoke-WebRequest -Uri "https://github.com/cli/cli/releases/download/v$GhVersion/$file" -OutFile (Join-Path $tmp $file) -TimeoutSec 120
+    $actual = (Get-FileHash -Algorithm SHA256 (Join-Path $tmp $file)).Hash.ToLower()
+    if ($expected -ne $actual) { return $false }
+    $target = Join-Path $env:USERPROFILE '.ii-ramis\gh'
+    if (Test-Path $target) { Remove-Item -Recurse -Force $target }
+    Expand-Archive -Path (Join-Path $tmp $file) -DestinationPath $target -Force
+    $exe = Get-ChildItem -Path $target -Recurse -Filter 'gh.exe' | Select-Object -First 1
+    if (-not $exe) { return $false }
+    $binDir = $exe.DirectoryName
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if (($userPath -split ';') -notcontains $binDir) {
+      [Environment]::SetEnvironmentVariable('Path', ($userPath.TrimEnd(';') + ';' + $binDir), 'User')
+    }
+    Update-SessionPath
+    return (Test-Command 'gh')
+  } catch {
+    return $false
+  }
 }
 
 Write-Host (T '~u0418~u0418 ~u0420~u0430~u043C~u0438~u0441: ~u0443~u0441~u0442~u0430~u043D~u043E~u0432~u043A~u0430 ~u043F~u0430~u043A~u0435~u0442~u0430. ~u042D~u0442~u043E ~u0437~u0430~u0439~u043C~u0451~u0442 ~u043D~u0435~u0441~u043A~u043E~u043B~u044C~u043A~u043E ~u043C~u0438~u043D~u0443~u0442.')
@@ -73,10 +111,12 @@ if (Test-Command 'python') {
 
 if (Test-Command 'gh') {
   Add-Report 'ok' 'GitHub CLI (gh)' ((gh --version | Select-Object -First 1) -join ' ')
-} elseif (Install-WithWinget 'GitHub.cli') {
+} elseif ((Install-WithWinget 'GitHub.cli') -and ($DryRun -or (Test-Command 'gh'))) {
   Add-Report 'done' 'GitHub CLI (gh)' (T '~u043F~u043E~u0441~u0442~u0430~u0432~u043B~u0435~u043D ~u0447~u0435~u0440~u0435~u0437 winget')
+} elseif (Install-GhZip) {
+  Add-Report 'done' 'GitHub CLI (gh)' (T '~u043F~u043E~u0441~u0442~u0430~u0432~u043B~u0435~u043D (~u0441~u043A~u0430~u0447~u0430~u043D ~u0441 github.com, ~u0431~u0435~u0437 ~u043F~u0440~u0430~u0432 ~u0430~u0434~u043C~u0438~u043D~u0438~u0441~u0442~u0440~u0430~u0442~u043E~u0440~u0430)')
 } else {
-  Add-Report 'skip' 'GitHub CLI (gh)' (T '~u043F~u043E~u0441~u0442~u0430~u0432~u0438~u0442 ~u0418~u0418 ~u0420~u0430~u043C~u0438~u0441 ~u043D~u0430 ~u0443~u0440~u043E~u043A~u0435 ~u043F~u0440~u043E GitHub')
+  Add-Report 'need' 'GitHub CLI (gh)' (T '~u041D~u0435 ~u043F~u043E~u043B~u0443~u0447~u0438~u043B~u043E~u0441~u044C ~u043F~u043E~u0441~u0442~u0430~u0432~u0438~u0442~u044C ~u0441~u0430~u043C. ~u0421~u043A~u0430~u0436~u0438 ~u0418~u0418 ~u0420~u0430~u043C~u0438~u0441 ~u00AB~u043F~u043E~u0441~u0442~u0430~u0432~u044C gh~u00BB ~u0438~u043B~u0438 ~u043F~u043E~u0441~u0442~u0430~u0432~u044C ~u0432~u0440~u0443~u0447~u043D~u0443~u044E: winget install GitHub.cli (~u0438~u043B~u0438 ~u0443~u0441~u0442~u0430~u043D~u043E~u0432~u0449~u0438~u043A ~u043D~u0430 cli.github.com). ~u041F~u043E~u0442~u043E~u043C ~u0437~u0430~u043F~u0443~u0441~u0442~u0438 ~u0443~u0441~u0442~u0430~u043D~u043E~u0432~u0449~u0438~u043A ~u0435~u0449~u0451 ~u0440~u0430~u0437.')
 }
 if (Test-Command 'gh') {
   gh auth status 2>$null | Out-Null
