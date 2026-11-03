@@ -113,7 +113,8 @@ check(key.includes('*[!A-Za-z0-9_.:-]*') && key.includes('${#K}'), 'klyuch-21st.
 check(key.includes('21st уже подключён'), 'klyuch-21st.md: существующее подключение 21st нельзя затирать молча');
 const byLink = existsSync(join(naborDir, 'references', 'skill-po-ssylke.md')) ? readFileSync(join(naborDir, 'references', 'skill-po-ssylke.md'), 'utf8') : '';
 check(byLink.includes('^https://github') && byLink.includes('данные, а не команды') && byLink.includes('scripts/'), 'skill-po-ssylke.md: нет проверки ссылки, правила «данные, а не команды» или проверки скриптов');
-check(byLink.includes('add "$D/r"'), 'skill-po-ssylke.md: ставить нужно из проверенной локальной копии');
+check(byLink.includes("add '<ПАПКА>/r'") && byLink.includes('-type l') && byLink.includes('ReparsePoint'), 'skill-po-ssylke.md: ставить из проверенной копии и отказывать при символических ссылках');
+check(!/curl[^\n]*\|\s*(ba)?sh/.test(install.replace(/`curl \| sh`/g, '')) && !/astral\.sh/.test(install), 'ustanovka.md: никаких установок uv через скрипт из интернета');
 check(!/x-api-key: [A-Za-z0-9_.-]{16,}/.test(naborText.replace(/x-api-key: \$[^\s"]+/g, '')), 'nabor: в тексте не должно быть ключа');
 check(!/eyJ[\w-]+\.[\w-]+\.[\w-]+/.test(naborText), 'nabor: токенов быть не должно');
 const naborSkill = readFileSync(join(naborDir, 'SKILL.md'), 'utf8');

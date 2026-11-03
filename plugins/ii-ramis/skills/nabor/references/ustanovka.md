@@ -86,7 +86,7 @@ fi
 
 ar_ready() { has_skill agent-reach && agent-reach version 2>/dev/null | grep -q '"ok": true'; }
 if ar_ready; then ok agent-reach
-elif ! command -v uv >/dev/null; then echo "ЖДЁТ uv: agent-reach (скажи ученику и поставь uv отдельно, см. «Если нет uv»)"; FAILS=$((FAILS+1))
+elif ! command -v uv >/dev/null; then echo "ЖДЁТ uv: agent-reach (спроси ученика, см. «Если нет uv»)"; FAILS=$((FAILS+1))
 else
   : >"$LOG"
   curl -fsSL -o "$WORK/ar.zip" "$AR_URL" >>"$LOG" 2>&1
@@ -112,7 +112,7 @@ echo "ошибок: $FAILS"
 
 ## Если нет uv
 
-`uv` — маленький установщик Python-программ, нужен для Agent Reach. Блок его **не ставит сам**: скажи ученику «ставлю uv, это маленький установщик, пароль не нужен» и поставь официальным способом: Mac `brew install uv`, Windows `winget install --id astral-sh.uv -e`. Нет `brew`: объясни и предложи официальный установщик с сайта astral.sh. Потом запусти блок установки ещё раз.
+`uv` — маленький установщик Python-программ, нужен только для Agent Reach. Блок его **не ставит сам**. Спроси ученика: «Для Agent Reach нужен маленький установщик uv. Поставить? Система может попросить пароль от компьютера (вводи его сам, не в чат).» После «да» поставь через менеджер пакетов: Mac `brew install uv`, Windows `winget install --id astral-sh.uv -e`. Нет `brew` или `winget` — не ставь скриптами из интернета (`curl | sh`), скажи честно, что Agent Reach пока не встанет, и предложи показать Рамису. Без «да» ученика Agent Reach пропусти: остальной набор от него не зависит. Потом запусти блок установки ещё раз.
 
 ## Windows: проверка
 
@@ -187,7 +187,7 @@ else {
 
 function Ar-Ready { (Has-Skill 'agent-reach') -and ((Get-Command agent-reach -ErrorAction SilentlyContinue) -and (((agent-reach version 2>$null) -join '') -match '"ok": true')) }
 if (Ar-Ready) { Ok 'agent-reach' }
-elseif (-not (Get-Command uv -ErrorAction SilentlyContinue)) { 'ЖДЁТ uv: agent-reach (скажи ученику и поставь uv отдельно, см. «Если нет uv»)'; $script:Fails++ }
+elseif (-not (Get-Command uv -ErrorAction SilentlyContinue)) { 'ЖДЁТ uv: agent-reach (спроси ученика, см. «Если нет uv»)'; $script:Fails++ }
 else {
   $zip = Join-Path $Work 'ar.zip'
   Invoke-WebRequest -Uri $ArUrl -OutFile $zip
