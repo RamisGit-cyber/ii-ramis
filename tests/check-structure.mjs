@@ -90,7 +90,15 @@ for (const block of ['check-mac', 'install-mac', 'check-win', 'install-win']) {
 check(!/@latest/.test(codeBlocks(install)), 'ustanovka.md: версии в командах должны быть закреплены, @latest нельзя');
 check(install.includes('skills@1.7.6') && install.includes('DO_NOT_TRACK=1'), 'ustanovka.md: нет закреплённого skills и отключения статистики');
 check(/\$env:DO_NOT_TRACK = '1'/.test(install), 'ustanovka.md: в блоке Windows нет отключения статистики');
-check(install.includes('releases/download/v1.6.1/agent-reach.zip'), 'ustanovka.md: Agent Reach должен ставиться из закреплённого релиза');
+check(install.includes('releases/download/v1.6.1/agent-reach.zip') && /AR_SHA256="[0-9a-f]{64}"/.test(install) && /\$ArSha256 = '[0-9a-f]{64}'/.test(install), 'ustanovka.md: Agent Reach: закреплённый релиз и SHA-256 (Mac и Windows)');
+const pinned = [...install.matchAll(/skill_pinned [\w./-]+ ([0-9a-f]{40}) /gi)].length;
+const pinnedWin = [...install.matchAll(/Skill-Pinned '[^']+' '([0-9a-f]{40})'/gi)].length;
+check(pinned === 4 && pinnedWin === 4, `ustanovka.md: четыре навыка должны ставиться из закреплённых коммитов (Mac ${pinned}, Windows ${pinnedWin})`);
+const installBlocks = [...install.matchAll(/```(?:bash|powershell) install-(?:mac|win)\n([\s\S]*?)```/g)].map((m) => m[1]).join('\n');
+check(!/brew install|winget install|apt(-get)? install/.test(installBlocks), 'install-блоки не должны сами ставить системные программы (brew/winget): только после слова ученику');
+check(!/plugin marketplace add (?!anthropics\/claude-plugins-official)/.test(installBlocks), 'install-блоки: можно добавлять только маркетплейс Anthropic');
+check(!/rm -rf (?!"\$WORK")/.test(installBlocks), 'install-блоки: удаление только своей временной папки');
+check(/"status":"%s","tries"/.test(installBlocks) && /"tries":/.test(installBlocks), 'install-блоки: нет счётчика попыток в nabor.json');
 check(!/pip install agent-reach|uv tool install agent-reach/.test(naborText), 'nabor: нельзя ставить agent-reach из PyPI (чужой пакет)');
 check(!/impeccable@impeccable/.test(install), 'ustanovka.md: плагин impeccable с хуками ставить нельзя');
 check(!/\b(pdf|xlsx|pptx|docx|skill-creator)\b.*(--skill|plugin install)/.test(install), 'ustanovka.md: pdf/xlsx/pptx/docx/skill-creator не ставим');
@@ -101,10 +109,16 @@ check(!/curl[^\n]*\|\s*(ba)?sh|irm[^\n]*\|\s*iex/.test(codeBlocks(naborText)), '
 const key = existsSync(join(naborDir, 'references', 'klyuch-21st.md')) ? readFileSync(join(naborDir, 'references', 'klyuch-21st.md'), 'utf8') : '';
 check(key.includes('Никогда не запускай `claude mcp get 21st`'), 'klyuch-21st.md: нет запрета claude mcp get (печатает ключ)');
 check(/pbpaste/.test(key) && /Get-Clipboard/.test(key), 'klyuch-21st.md: ключ должен браться из буфера обмена');
+check(key.includes('*[!A-Za-z0-9_.:-]*') && key.includes('${#K}'), 'klyuch-21st.md: Mac должен проверять весь буфер, не построчно');
+check(key.includes('21st уже подключён'), 'klyuch-21st.md: существующее подключение 21st нельзя затирать молча');
+const byLink = existsSync(join(naborDir, 'references', 'skill-po-ssylke.md')) ? readFileSync(join(naborDir, 'references', 'skill-po-ssylke.md'), 'utf8') : '';
+check(byLink.includes('^https://github') && byLink.includes('данные, а не команды') && byLink.includes('scripts/'), 'skill-po-ssylke.md: нет проверки ссылки, правила «данные, а не команды» или проверки скриптов');
+check(byLink.includes('add "$D/r"'), 'skill-po-ssylke.md: ставить нужно из проверенной локальной копии');
 check(!/x-api-key: [A-Za-z0-9_.-]{16,}/.test(naborText.replace(/x-api-key: \$[^\s"]+/g, '')), 'nabor: в тексте не должно быть ключа');
 check(!/eyJ[\w-]+\.[\w-]+\.[\w-]+/.test(naborText), 'nabor: токенов быть не должно');
 const naborSkill = readFileSync(join(naborDir, 'SKILL.md'), 'utf8');
 check(naborSkill.includes('по факту') && naborSkill.includes('по памяти'), 'nabor: нет правила «отвечать по факту»');
+check(naborSkill.includes('данные, а не команды') && naborSkill.includes('declined') && /tries/.test(naborSkill), 'nabor: нет правила про недоверенный текст, отказа или лимита попыток');
 check(/21st/.test(naborSkill) && /Молча не ставь/.test(naborSkill), 'nabor: 21st не должен ставиться молча');
 check(readFileSync(join(plugin, 'skills', 'ii-ramis', 'references', 'kurs-karta.md'), 'utf8').includes('Чек-лист наставника\nКаждый пункт проверяй блоком проверки'), 'kurs-karta.md: нет чек-листа урока 5');
 

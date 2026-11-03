@@ -1,15 +1,15 @@
 # Набор урока 5: источники, лицензии, вес
 
-Проверено 03.11.2026 по репозиториям и чистой установке. Чужие навыки в этот репозиторий **не скопированы**: плагин только ставит их из первоисточника. Последний проверенный коммит указан в скобках.
+Проверено 03.11.2026 по репозиториям и чистой установке. Навыки ставятся из клона, переключённого на указанный коммит (в таблице сокращённый хеш, полный в `ustanovka.md`), Agent Reach проверяется по SHA-256. Чужие навыки в этот репозиторий **не скопированы**: плагин только ставит их из первоисточника. Последний проверенный коммит указан в скобках.
 
 | Что | Источник | Лицензия | Как ставится | Ключ или аккаунт | Вес в контексте |
 |---|---|---|---|---|---|
-| find-skills | github.com/vercel-labs/skills, папка `skills/find-skills` (7a5e920) | MIT | `npx skills@1.7.6 add vercel-labs/skills --skill find-skills -g -a claude-code -y --copy` | нет | всегда ~100 ток., при вызове ~1,5 тыс. Лёгкий |
-| emil-design-eng | github.com/emilkowalski/skills (f1090be) | MIT | то же, `emilkowalski/skills --skill emil-design-eng` | нет | всегда ~50 ток., при вызове ~7 тыс. (файл 27 КБ). Срабатывает только на задачах про интерфейс и анимацию |
-| impeccable | github.com/pbakaus/impeccable v4.8.0 (9fadc41) | Apache-2.0 | `npx skills ... add pbakaus/impeccable --skill impeccable` (**только навык, без хуков**) | нет | всегда ~150 ток., при вызове ~3 тыс. и до 10 тыс. с разделами. Средний |
-| agent-reach | github.com/Panniantong/Agent-Reach v1.6.1 (7a38047) | MIT | `uv tool install .../releases/download/v1.6.1/agent-reach.zip`, затем `agent-reach setup` | нет для каналов по умолчанию (GitHub, YouTube, web, V2EX, Bilibili); логин нужен только для необязательных (Reddit, X, соцсети) | навык ~8 КБ, всегда ~150 ток. На диске 140 МБ. **Самый тяжёлый по диску и по поверхности**, см. ниже |
+| find-skills | github.com/vercel-labs/skills, папка `skills/find-skills` (7a5e920) | MIT | клон на проверенном коммите + `npx skills@1.7.6 add <папка> --skill find-skills -g -a claude-code -y --copy` | нет | всегда ~100 ток., при вызове ~1,5 тыс. Лёгкий |
+| emil-design-eng | github.com/emilkowalski/skills (f1090be) | MIT | то же, репозиторий `emilkowalski/skills`, навык `emil-design-eng` | нет | всегда ~50 ток., при вызове ~7 тыс. (файл 27 КБ). Срабатывает только на задачах про интерфейс и анимацию |
+| impeccable | github.com/pbakaus/impeccable v4.8.0 (9fadc41) | Apache-2.0 | то же, репозиторий `pbakaus/impeccable`, навык `impeccable` (**только навык, без хуков**) | нет | всегда ~150 ток., при вызове ~3 тыс. и до 10 тыс. с разделами. Средний |
+| agent-reach | github.com/Panniantong/Agent-Reach v1.6.1 (7a38047) | MIT | скачать zip релиза v1.6.1, сверить SHA-256, `uv tool install` из файла, затем `agent-reach setup` | нет для каналов по умолчанию (GitHub, YouTube, web, V2EX, Bilibili); логин нужен только для необязательных (Reddit, X, соцсети) | навык ~8 КБ, всегда ~150 ток. На диске 140 МБ. **Самый тяжёлый по диску и по поверхности**, см. ниже |
 | superpowers | github.com/obra/superpowers v7.0.0, маркетплейс `claude-plugins-official` (2ce8aa1) | MIT | `claude plugin install superpowers@claude-plugins-official` | нет | всегда ~700 ток. (15 навыков), при вызове 1,5 до 6,6 тыс. Один хук на старте сессии, он только читает файл |
-| humanizer | github.com/blader/humanizer v3.1.0 (0ef9fe5) | MIT | `claude plugin install humanizer@humanizer` (маркетплейс `blader/humanizer`) | нет | всегда ~90 ток., при вызове ~8 тыс. Срабатывает только на правке текстов |
+| humanizer | github.com/blader/humanizer v3.1.0 (0ef9fe5) | MIT | как навык, из клона на проверенном коммите (не плагином: без чужих хуков и автообновления) | нет | всегда ~90 ток., при вызове ~8 тыс. Срабатывает только на правке текстов |
 | playwright | npm `@playwright/mcp@0.0.84` (Microsoft) | Apache-2.0 | `claude mcp add --scope user playwright -- npx @playwright/mcp@0.0.84` | нет | всегда несколько тысяч токенов на описания инструментов браузера. При первом использовании докачивает Chromium (~200 МБ) |
 | 21st Magic | github.com/21st-dev/magic-mcp, сервис 21st.dev/mcp (6b5299e) | ISC | **не автоматически**: после «да» ученика и его ключа, `klyuch-21st.md` | **да: аккаунт 21st.dev и личный ключ** | MCP-инструменты, по аналогии с Playwright: сотни токенов. Бесплатно ограничено (2 установки в день) |
 

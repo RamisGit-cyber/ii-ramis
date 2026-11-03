@@ -2,7 +2,7 @@
 // запускает их в пустом HOME ДВАЖДЫ (идемпотентность) и проверяет по диску, что навыки появились.
 // Нужны сеть, git, node 22.20+, uv и claude. Запуск: node tests/check-clean-install.mjs (около 1-3 минут).
 // На Linux/Mac. Блоки Windows (PowerShell) здесь не запускаются.
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, chmodSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, chmodSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,12 +45,14 @@ try {
   }
   const plugins = spawnSync('claude', ['plugin', 'list', '--json'], { env, encoding: 'utf8' }).stdout;
   check(plugins.includes('"id": "superpowers@claude-plugins-official"'), 'плагин superpowers не установлен');
-  check(plugins.includes('"id": "humanizer@humanizer"'), 'плагин humanizer не установлен');
+  check(existsSync(join(home, '.claude', 'skills', 'humanizer', 'SKILL.md')), 'навык humanizer не установлен');
+  check(!plugins.includes('"id": "humanizer@humanizer"'), 'humanizer не должен ставиться плагином из чужого маркетплейса');
   check(!plugins.includes('"id": "impeccable@'), 'плагин impeccable (с хуками) ставиться не должен');
   const config = JSON.parse(readFileSync(join(home, '.claude.json'), 'utf8'));
   check(Boolean(config.mcpServers?.playwright), 'MCP playwright не подключён');
   check(JSON.stringify(config.mcpServers?.playwright ?? {}).includes('@playwright/mcp@0.0.84'), 'playwright должен быть закреплён на 0.0.84');
-  check(existsSync(join(home, '.ii-ramis', 'nabor.json')), 'нет ~/.ii-ramis/nabor.json');
+  const marker = JSON.parse(readFileSync(join(home, '.ii-ramis', 'nabor.json'), 'utf8'));
+  check(marker.status === 'ok' && marker.tries === 2 && marker.kit === '2.4.0', `nabor.json: ожидали status ok и tries 2 после двух запусков, получили ${JSON.stringify(marker)}`);
   check(!existsSync(join(home, '.claude', 'settings.json')) || !/bypassPermissions|skipDangerousModePermissionPrompt/.test(readFileSync(join(home, '.claude', 'settings.json'), 'utf8')), 'в settings.json появился обход разрешений');
 
   const verdict = run(block('ustanovka.md', 'check-mac'));
@@ -78,8 +80,29 @@ try {
   const again = run(install).stdout;
   check(!/ждёт ключ: 21st/.test(again), 'после подключения 21st установка не должна ждать ключ');
 
-  // Чужой пакет agent-reach с PyPI не должен оказаться установленным
-  check(!existsSync(join(home, '.local', 'share', 'uv', 'tools', 'agent-reach', 'pyvenv.cfg')) || /Panniantong|agent_reach/.test(readFileSync(join(home, '.local', 'share', 'uv', 'tools', 'agent-reach', 'uv-receipt.toml'), 'utf8')), 'agent-reach поставлен не из релиза автора');
+  // Agent Reach должен быть поставлен из zip релиза автора (квитанция uv хранит источник), а не из PyPI
+  const receipt = join(home, '.local', 'share', 'uv', 'tools', 'agent-reach', 'uv-receipt.toml');
+  check(existsSync(receipt) && !/registry|pypi/i.test(readFileSync(receipt, 'utf8').split('[tool.options]')[0].replace(/(yt-dlp|requests|loguru|pyyaml|websockets)[^\n]*/gi, '')), 'agent-reach поставлен не из релиза автора');
+
+  // Многострочный буфер (ключ плюс чужая строка) должен быть отвергнут и никуда не уйти
+  const multi = `${fakeKey}\nsecret-password-line`;
+  writeFileSync(join(shims, 'pbpaste'), `#!/bin/sh\nprintf '%s' '${multi}'\n`);
+  const keyBad = run(block('klyuch-21st.md', 'klyuch-21st-mac').replace('claude mcp list 2>/dev/null | grep -q \'^21st:\'', 'false'), { PATH: `${shims}:${env.PATH}` });
+  check(/не похоже на ключ/.test(keyBad.stdout), 'многострочный буфер должен отвергаться');
+
+  // Без uv блок не ставит ничего системного, ждёт и честно ставит status partial
+  const noUvHome = mkdtempSync(join(tmpdir(), 'ii-ramis-nouv-'));
+  const noUvShims = join(noUvHome, '_bin');
+  mkdirSync(noUvShims);
+  const claudeBin = spawnSync('bash', ['-c', 'command -v claude'], { env, encoding: 'utf8' }).stdout.trim();
+  symlinkSync(claudeBin, join(noUvShims, 'claude'));
+  const noUvPath = [noUvShims, ...env.PATH.split(':').filter((dir) => !existsSync(join(dir, 'uv')) && !existsSync(join(dir, 'brew')))].join(':');
+  const noUv = spawnSync('bash', ['-c', install], { env: { ...env, HOME: noUvHome, PATH: noUvPath }, encoding: 'utf8', timeout: 600000 });
+  console.log('--- без uv ---\n' + noUv.stdout);
+  check(/ЖДЁТ uv: agent-reach/.test(noUv.stdout), 'без uv блок должен сказать «ЖДЁТ uv», а не ставить uv сам');
+  const partial = JSON.parse(readFileSync(join(noUvHome, '.ii-ramis', 'nabor.json'), 'utf8'));
+  check(partial.status === 'partial' && partial.tries === 1, `без uv nabor.json должен быть partial/1, получили ${JSON.stringify(partial)}`);
+  rmSync(noUvHome, { recursive: true, force: true });
 } finally {
   rmSync(home, { recursive: true, force: true });
 }

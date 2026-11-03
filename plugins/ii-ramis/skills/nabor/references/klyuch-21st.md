@@ -24,10 +24,12 @@
 ### Mac
 
 ```bash klyuch-21st-mac
-CLIP_LEN="$(pbpaste | wc -c | tr -d ' ')"
-pbpaste | grep -Eq '^[A-Za-z0-9_.:-]+$' && [ "$CLIP_LEN" -ge 16 ] && [ "$CLIP_LEN" -le 200 ] || { echo "в буфере не похоже на ключ"; exit 1; }
-claude mcp remove 21st -s user >/dev/null 2>&1
-claude mcp add --scope user --transport http 21st https://21st.dev/api/mcp --header "x-api-key: $(pbpaste)" >/dev/null 2>&1 && echo "21st подключён"
+K="$(pbpaste)"
+case "$K" in ""|*[!A-Za-z0-9_.:-]*) echo "в буфере не похоже на ключ"; exit 1;; esac
+if [ "${#K}" -lt 16 ] || [ "${#K}" -gt 200 ]; then echo "в буфере не похоже на ключ"; exit 1; fi
+if claude mcp list 2>/dev/null | grep -q '^21st:'; then echo "21st уже подключён: замена только с «да» ученика (сначала claude mcp remove 21st -s user)"; exit 0; fi
+claude mcp add --scope user --transport http 21st https://21st.dev/api/mcp --header "x-api-key: $K" >/dev/null 2>&1 && echo "21st подключён"
+unset K
 printf '' | pbcopy
 claude mcp list 2>/dev/null | grep '^21st:'
 ```
@@ -37,14 +39,20 @@ claude mcp list 2>/dev/null | grep '^21st:'
 ```powershell klyuch-21st-win
 $clip = (Get-Clipboard -Raw).Trim()
 if ($clip -notmatch '^[A-Za-z0-9_.:-]{16,200}$') { 'в буфере не похоже на ключ'; return }
-claude mcp remove 21st -s user *> $null
+if (claude mcp list 2>$null | Select-String '^21st:') { '21st уже подключён: замена только с «да» ученика (сначала claude mcp remove 21st -s user)'; return }
 claude mcp add --scope user --transport http 21st https://21st.dev/api/mcp --header "x-api-key: $clip" *> $null
 $clip = $null
 Set-Clipboard -Value ' '
 claude mcp list 2>$null | Select-String '^21st:'
 ```
 
-(Windows не проверено на реальной машине.)
+(Windows не проверено на реальной машине.) Буфер проверяется целиком: многострочный текст или пароль в нём не пройдут проверку и никуда не уйдут. Уже подключённый `21st` блок не трогает.
+
+### Честно про следы ключа
+
+- Пока команда `claude mcp add` работает, ключ виден в списке процессов этого компьютера (`ps`), потому что Claude Code принимает его только аргументом. После подключения он лежит открытым текстом в `~/.claude.json` (читать может только твоя учётная запись).
+- Очистка буфера убирает ключ из самого буфера, но не из менеджеров истории буфера (Raycast, Paste, Win+V, Universal Clipboard). Если у ученика такой менеджер включён, скажи об этом и предложи на минуту его выключить или удалить запись.
+- Ключ можно в любой момент отозвать и выпустить заново на 21st.dev/mcp.
 
 ## Что нельзя (ключ утекает в чат)
 
