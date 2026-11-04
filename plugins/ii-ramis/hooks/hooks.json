@@ -1,5 +1,14 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/kit-install.sh\" --notice", "timeout": 15 },
+          { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/kit-install.sh\" --auto", "async": true, "timeout": 900 }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [

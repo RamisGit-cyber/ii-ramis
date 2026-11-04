@@ -88,7 +88,7 @@ Bypass на курсе включать можно, но только в коп�
 Тема: как просить красивый сайт у Claude (референсы, один акцентный цвет, шрифты, отступы, мобильная версия) и инструменты для этого. Ученик на уроке ничего не устанавливает: набор стоит заранее (ставит навык `nabor`), он только спрашивает «у меня есть X?». Исключение: GSAP-навыки (`github.com/greensock/gsap-skills`) и apple-design (`github.com/emilkowalski/skills`) ученики ставят сами по ссылке GitHub, это практика урока; ты помогаешь, если застрял (`references/skill-po-ssylke.md` в навыке `nabor`). ⚠️ ТОДО Рамис: программу и домашку заполнить после урока.
 
 ### Чек-лист наставника
-Каждый пункт проверяй блоком проверки из навыка `nabor` (`ustanovka.md`), он читает диск и список плагинов. Нет — поставь блоком установки, потом перепроверь. Память и `~/.ii-ramis/nabor.json` не доказательство.
+Каждый пункт проверяй блоком проверки из навыка `nabor` (`ustanovka.md`), он читает диск и список плагинов. Нет — набор ставит хук при старте сессии (в песочнице Desktop Bash-командой не пройдёт, см. раздел 1 навыка `nabor`); потом перепроверь. Память и `~/.ii-ramis/nabor.json` не доказательство.
 - [ ] find-skills стоит | `~/.claude/skills/find-skills/SKILL.md`
 - [ ] impeccable стоит (как навык, без хуков) | `~/.claude/skills/impeccable/SKILL.md`
 - [ ] emil-design-eng стоит | `~/.claude/skills/emil-design-eng/SKILL.md`
@@ -96,6 +96,9 @@ Bypass на курсе включать можно, но только в коп�
 - [ ] superpowers стоит | в `claude plugin list --json` есть `superpowers@`
 - [ ] humanizer стоит (навык или плагин) | `~/.claude/skills/humanizer/SKILL.md`, или `humanizer@` в списке плагинов, или навык из аккаунта в `~/.claude/skills/synced/*/humanizer/`
 - [ ] Playwright подключён (с урока 4, не дублировать) | имя `playwright` в списке MCP, или плагин `playwright@`
+- [ ] HyperFrames стоит | `~/.claude/skills/hyperframes/SKILL.md` и `~/.claude/skills/hyperframes-cli/SKILL.md`
+- [ ] Remotion стоит | `~/.claude/skills/remotion-best-practices/SKILL.md`
+- [ ] ffmpeg (нужен только для рендера видео, не ошибка набора) | `command -v ffmpeg`; нет — скажи, как поставить, только с «да» ученика
 - [ ] 21st Magic: ключа нет — «ждёт ключ» это нормально, не ошибка | если ученик хотел: имя `21st` в списке MCP, `claude mcp list` показывает `Connected`. Ключ не показывать, `claude mcp get 21st` не запускать
 - [ ] Спросить: «открой Claude и спроси его: у меня есть impeccable? Он ответил «да, уже есть»?» | спроси, ответ ученика
 
