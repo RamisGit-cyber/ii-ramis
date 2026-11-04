@@ -27,6 +27,7 @@ SELF="${BASH_SOURCE[0]}"
 # --- закреплённые источники (проверены 04.11.2026) ---
 SKILLS_CLI="skills@1.7.6"
 PLAYWRIGHT_MCP="@playwright/mcp@0.0.84"
+MCP_PREFIX="$HOME/.ii-ramis/mcp" # сюда ставится Playwright MCP, чтобы Claude запускал его по абсолютному пути, а не через npx из папки проекта
 HYPERFRAMES_SHA="1ff4cefd40c8dad98127fc78e8761c1ac62053dd" # тег v0.9.12 репозитория heygen-com/hyperframes
 AR_URL="https://github.com/Panniantong/Agent-Reach/releases/download/v1.6.1/agent-reach.zip"
 AR_SHA256="51443d733bcb26064262442083a8f8abf6ba5e3e7df54beebafe98c88be04a60"
@@ -192,7 +193,11 @@ run_mode() {
   elif [ -z "$claude_bin" ]; then fail playwright "команда claude не найдена"
   else
     : >"$log"
-    claude mcp add --scope user playwright -- npx "$PLAYWRIGHT_MCP" >>"$log" 2>&1
+    # Пакет ставится один раз в свою папку: официальный реестр, без .npmrc пользователя и проекта, без скриптов установки.
+    mkdir -p "$MCP_PREFIX" && npm install --prefix "$MCP_PREFIX" --registry https://registry.npmjs.org/ --userconfig /dev/null --ignore-scripts --no-audit --no-fund "$PLAYWRIGHT_MCP" >>"$log" 2>&1
+    if [ -x "$MCP_PREFIX/node_modules/.bin/playwright-mcp" ]; then
+      claude mcp add --scope user playwright -- "$MCP_PREFIX/node_modules/.bin/playwright-mcp" >>"$log" 2>&1
+    fi
     if has_mcp playwright; then done_ playwright; else fail playwright "claude mcp add playwright"; fi
   fi
 

@@ -170,7 +170,10 @@ else {
 if (((Get-McpNames) -contains 'playwright') -or (Has-Plugin 'playwright')) { Ok 'playwright' }
 elseif (-not (Get-Command claude -ErrorAction SilentlyContinue)) { Fail 'playwright' 'команда claude не найдена' }
 else {
-  claude mcp add --scope user playwright -- npx.cmd '@playwright/mcp@0.0.84' *> $null
+  $mcpPrefix = "$HOME\.ii-ramis\mcp"
+  New-Item -ItemType Directory -Force $mcpPrefix | Out-Null
+  npm.cmd install --prefix $mcpPrefix --registry https://registry.npmjs.org/ --userconfig NUL --ignore-scripts --no-audit --no-fund '@playwright/mcp@0.0.84' *> $null
+  if (Test-Path "$mcpPrefix\node_modules\.bin\playwright-mcp.cmd") { claude mcp add --scope user playwright -- "$mcpPrefix\node_modules\.bin\playwright-mcp.cmd" *> $null }
   if ((Get-McpNames) -contains 'playwright') { Done 'playwright' } else { Fail 'playwright' 'claude mcp add playwright' }
 }
 

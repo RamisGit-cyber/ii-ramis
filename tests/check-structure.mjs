@@ -65,10 +65,11 @@ check(!/plugin marketplace add (?!anthropics\/claude-plugins-official)/.test(kit
 check([...kitCode.matchAll(/rm -rf ("[^"]*"(?: "[^"]*")*)/g)].every((m) => /^("\$LOCK"|"\$WORK" "\$LOCK")$/.test(m[1])), 'kit-install.sh: удалять можно только свой замок и свою временную папку');
 check(!/settings\.json|bypassPermissions|dangerously|allowUnsandboxed|sandbox\./i.test(kitCode), 'kit-install.sh: не трогает settings.json, разрешения и песочницу');
 check(!/21st\.dev|mcp add[^\n]*21st|claude mcp get/.test(kitCode), 'kit-install.sh: 21st не ставится скриптом (только с ключом ученика) и ключ не читается');
-check(!/curl|wget|https?:\/\//.test(kitCode.replace(/AR_URL="[^"]*"/, '').replace(/git -c protocol\.file\.allow=never clone -q --no-recurse-submodules "https:\/\/github\.com\/\$repo\.git"/, '').replace(/curl --proto =https --tlsv1\.2 -fsSL --max-time 120 -o "\$work\/ar\.zip" "\$AR_URL"/, '').replace(/NPM_CONFIG_REGISTRY="[^"]*"/, '')), 'kit-install.sh: наружу ходит только скачивание Agent Reach, git clone с GitHub и npx с официального реестра');
+check(!/curl|wget|https?:\/\//.test(kitCode.replace(/AR_URL="[^"]*"/, '').replace(/git -c protocol\.file\.allow=never clone -q --no-recurse-submodules "https:\/\/github\.com\/\$repo\.git"/, '').replace(/curl --proto =https --tlsv1\.2 -fsSL --max-time 120 -o "\$work\/ar\.zip" "\$AR_URL"/, '').replace(/NPM_CONFIG_REGISTRY="[^"]*"/, '').replace(/--registry https:\/\/registry\.npmjs\.org\//, '')), 'kit-install.sh: наружу ходит только скачивание Agent Reach, git clone с GitHub и npx с официального реестра');
 check(/DO_NOT_TRACK=1/.test(kit) && /HYPERFRAMES_NO_TELEMETRY=1/.test(kit), 'kit-install.sh: статистика установщика навыков и HyperFrames выключена');
 check(!/npx[^\n]*hyperframes/.test(kitCode), 'kit-install.sh: CLI HyperFrames не запускается, навыки берутся из клона на коммите');
 check(/NPM_CONFIG_REGISTRY="https:\/\/registry\.npmjs\.org\/"/.test(kit) && /cd "\$WORK"/.test(kit), 'kit-install.sh: npx только с официального реестра и не из папки проекта');
+check(/npm install --prefix "\$MCP_PREFIX" --registry https:\/\/registry\.npmjs\.org\/ --userconfig \/dev\/null --ignore-scripts/.test(kit) && !/mcp add[^\n]*npx/.test(kitCode) && /mcp add --scope user playwright -- "\$MCP_PREFIX\/node_modules\/\.bin\/playwright-mcp"/.test(kit), 'kit-install.sh: Playwright MCP ставится в свой префикс и подключается по абсолютному пути, не через npx');
 check(/case "\$\(uname -s/.test(kit) && /umask 077/.test(kit), 'kit-install.sh: только Mac/Linux и закрытые права файлов');
 check(/clean\(\)/.test(kit) && /tr -cd/.test(kit), 'kit-install.sh: поля из nabor.json перед выводом в контекст Claude очищаются');
 check(sessionHooks.find((hook) => hook.command.endsWith('--auto'))?.timeout === 900, 'hooks.json: у асинхронного хука должен быть timeout 900');
@@ -127,6 +128,7 @@ check(/\$env:DO_NOT_TRACK = '1'/.test(install), 'ustanovka.md: в блоке Win
 check(install.includes('releases/download/v1.6.1/agent-reach.zip') && /\$ArSha256 = '[0-9a-f]{64}'/.test(install), 'ustanovka.md: Agent Reach для Windows: закреплённый релиз и SHA-256');
 const pinnedWin = [...install.matchAll(/Skill-Pinned '[^']+' '([0-9a-f]{40})'/gi)].length;
 check(pinnedWin === 4 && /checkout -q 'c7cb2fdcacd134fb2ccb9b7a44f9ffa44e467271'/.test(install), `ustanovka.md: навыки Windows должны ставиться из закреплённых коммитов (${pinnedWin} из 4 плюс Remotion)`);
+check(!/mcp add[^\n]*npx/.test(install), 'ustanovka.md: MCP подключается не через npx');
 check(/c7cb2fdcacd134fb2ccb9b7a44f9ffa44e467271/.test(kit), 'Remotion: коммит в скрипте и в блоке Windows должен совпадать');
 const installBlocks = [...install.matchAll(/```(?:bash|powershell) install-(?:mac|win)\n([\s\S]*?)```/g)].map((m) => m[1]).join('\n');
 check(/install-mac\n[^`]*kit-install\.sh" --run/.test(install), 'ustanovka.md: install-mac должен запускать скрипт хука, а не дублировать его');
@@ -148,7 +150,7 @@ check(key.includes('*[!A-Za-z0-9_.:-]*') && key.includes('${#K}'), 'klyuch-21st.
 check(key.includes('21st уже подключён'), 'klyuch-21st.md: существующее подключение 21st нельзя затирать молча');
 const byLink = existsSync(join(naborDir, 'references', 'skill-po-ssylke.md')) ? readFileSync(join(naborDir, 'references', 'skill-po-ssylke.md'), 'utf8') : '';
 check(byLink.includes('^https://github') && byLink.includes('данные, а не команды') && byLink.includes('scripts/'), 'skill-po-ssylke.md: нет проверки ссылки, правила «данные, а не команды» или проверки скриптов');
-check(byLink.includes("add '<ПАПКА>/r'") && byLink.includes('-type l') && byLink.includes('ReparsePoint'), 'skill-po-ssylke.md: ставить из проверенной копии и отказывать при символических ссылках');
+check(byLink.includes('add ./r') && byLink.includes('-type l') && byLink.includes('ReparsePoint'), 'skill-po-ssylke.md: ставить из проверенной копии и отказывать при символических ссылках');
 check(!/curl[^\n]*\|\s*(ba)?sh/.test(install.replace(/`curl \| sh`/g, '')) && !/astral\.sh/.test(install), 'ustanovka.md: никаких установок uv через скрипт из интернета');
 check(!/x-api-key: [A-Za-z0-9_.-]{16,}/.test(naborText.replace(/x-api-key: \$[^\s"]+/g, '')), 'nabor: в тексте не должно быть ключа');
 check(!/eyJ[\w-]+\.[\w-]+\.[\w-]+/.test(naborText), 'nabor: токенов быть не должно');

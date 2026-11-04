@@ -59,7 +59,10 @@ try {
   check(plugins.includes('"id": "superpowers@claude-plugins-official"'), 'плагин superpowers не установлен');
   check(!plugins.includes('"id": "humanizer@humanizer"') && !plugins.includes('"id": "impeccable@'), 'нельзя ставить плагины humanizer@humanizer и impeccable@ (чужие хуки)');
   const config = JSON.parse(readFileSync(join(home, '.claude.json'), 'utf8'));
-  check(JSON.stringify(config.mcpServers?.playwright ?? {}).includes('@playwright/mcp@0.0.84'), 'playwright должен быть закреплён на 0.0.84');
+  const pw = config.mcpServers?.playwright ?? {};
+  check(pw.command === join(home, '.ii-ramis', 'mcp', 'node_modules', '.bin', 'playwright-mcp') && existsSync(pw.command), `playwright должен запускаться по абсолютному пути из ~/.ii-ramis/mcp, а не через npx: ${JSON.stringify(pw)}`);
+  check(!JSON.stringify(pw).includes('npx'), 'playwright не должен запускаться через npx');
+  check(JSON.parse(readFileSync(join(home, '.ii-ramis', 'mcp', 'node_modules', '@playwright', 'mcp', 'package.json'), 'utf8')).version === '0.0.84', 'playwright должен быть закреплён на 0.0.84');
   check(!config.mcpServers?.['21st'] && !config.mcpServers?.magic, '21st без согласия и ключа ставиться не должен');
   check(!existsSync(join(home, '.claude', 'settings.json')) || !/bypassPermissions|skipDangerousModePermissionPrompt/.test(readFileSync(join(home, '.claude', 'settings.json'), 'utf8')), 'в settings.json появился обход разрешений');
 
