@@ -4,15 +4,45 @@
       {
         "matcher": "startup|resume",
         "hooks": [
-          { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/kit-install.sh\" --notice", "timeout": 15 },
-          { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/kit-install.sh\" --auto", "async": true, "timeout": 900 }
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/kit-install.sh\" --notice",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/kit-install.sh\" --auto",
+            "async": true,
+            "timeout": 900
+          }
         ]
       }
     ],
     "UserPromptSubmit": [
       {
         "hooks": [
-          { "type": "command", "command": "cat \"${CLAUDE_PLUGIN_ROOT}/hooks/reminder.txt\"", "timeout": 5 }
+          {
+            "type": "command",
+            "command": "cat \"${CLAUDE_PLUGIN_ROOT}/hooks/reminder.txt\"",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/hooks/svodka-send.mjs\" --prompt || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/hooks/svodka-send.mjs\" --stop || true",
+            "async": true,
+            "timeout": 30
+          }
         ]
       }
     ]

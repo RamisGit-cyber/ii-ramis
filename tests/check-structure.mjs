@@ -35,19 +35,30 @@ check(marketplace.plugins?.[0]?.source === './plugins/ii-ramis', 'marketplace.js
 
 const hooks = readJson(join(plugin, 'hooks', 'hooks.json'));
 const events = Object.keys(hooks.hooks || {}).sort();
-check(events.length === 2 && events[0] === 'SessionStart' && events[1] === 'UserPromptSubmit', 'hooks.json: разрешены только SessionStart (установка набора) и UserPromptSubmit (напоминание)');
+check(events.join(',') === 'SessionStart,Stop,UserPromptSubmit', 'hooks.json: разрешены только SessionStart (установка набора), Stop (сводка) и UserPromptSubmit (напоминание и отказы)');
+const stopHook = hooks.hooks?.Stop?.[0]?.hooks?.[0];
+check(stopHook?.async === true && /svodka-send\.mjs" --stop/.test(stopHook.command), 'hooks.json: сводку отправляет асинхронный хук Stop через svodka-send.mjs');
+check(/svodka-send\.mjs\\" --prompt/.test(JSON.stringify(hooks.hooks?.UserPromptSubmit ?? [])), 'hooks.json: отказы записывает хук UserPromptSubmit');
 const sessionHooks = hooks.hooks?.SessionStart?.[0]?.hooks ?? [];
 check(sessionHooks.length === 2 && sessionHooks.every((hook) => hook.type === 'command' && /^bash "\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/kit-install\.sh" --(notice|auto)$/.test(hook.command)), 'hooks.json: SessionStart запускает только kit-install.sh --notice и --auto');
 check(sessionHooks.find((hook) => hook.command.endsWith('--auto'))?.async === true && !sessionHooks.find((hook) => hook.command.endsWith('--notice'))?.async, 'hooks.json: --auto должен быть асинхронным (async: true), --notice синхронным');
 check(/startup/.test(hooks.hooks?.SessionStart?.[0]?.matcher ?? ''), 'hooks.json: SessionStart должен срабатывать на startup');
 check(!JSON.stringify(hooks).includes('PreToolUse'), 'hooks.json: никаких фильтров команд (PreToolUse)');
-check(!JSON.stringify(hooks).includes('node '), 'hooks.json: хук не должен требовать Node');
-check(JSON.stringify(hooks.hooks?.UserPromptSubmit ?? []).includes('reminder.txt'), 'hooks.json: UserPromptSubmit должен только печатать reminder.txt');
+check(!/svodka-send/.test(JSON.stringify(hooks.hooks?.SessionStart ?? [])) && JSON.stringify(hooks).split('command -v node').length === 3, 'hooks.json: Node нужен только хукам сводки и с проверкой, что он есть; установка набора от Node не зависит');
+check(JSON.stringify(hooks.hooks?.UserPromptSubmit ?? []).includes('reminder.txt'), 'hooks.json: UserPromptSubmit печатает reminder.txt');
 const reminder = readFileSync(join(plugin, 'hooks', 'reminder.txt'), 'utf8');
 check(reminder.includes('версия 2.5'), 'reminder.txt: версия должна совпадать с plugin.json');
 check(!existsSync(join(plugin, 'scripts')), 'папки scripts быть не должно');
 const code = listFiles(plugin).filter((file) => ['.mjs', '.js', '.sh', '.ps1', '.py'].includes(extname(file)));
-check(code.length === 1 && code[0] === join(plugin, 'hooks', 'kit-install.sh'), `в плагине разрешён один файл кода hooks/kit-install.sh: ${code.join(', ')}`);
+check(code.sort().join(',') === [join(plugin, 'hooks', 'kit-install.sh'), join(plugin, 'hooks', 'svodka-send.mjs')].sort().join(','), `в плагине разрешены только hooks/kit-install.sh и hooks/svodka-send.mjs: ${code.join(', ')}`);
+
+// Хук сводки: безопасность
+const sv = readFileSync(join(plugin, 'hooks', 'svodka-send.mjs'), 'utf8');
+const svUrls = (sv.match(/https?:\/\/[A-Za-z0-9.\/_-]+/g) ?? []).filter((url) => !url.endsWith('/'));
+check(svUrls.every((url) => url === 'https://fjxevxclomxlvhpjgbjs.supabase.co/rest/v1/sessions'), `svodka-send.mjs: наружу ходит только в таблицу sessions проекта Рамиса: ${svUrls.join(', ')}`);
+check(!/service_role|child_process|exec\(|spawn|eval\(/.test(sv), 'svodka-send.mjs: нет запуска команд, eval и service_role');
+check(/AbortSignal\.timeout\(8000\)/.test(sv) && /MIN_GAP_MS/.test(sv) && /MAX_PER_DAY/.test(sv) && /consent === false/.test(sv) && /UNSAFE/.test(sv), 'svodka-send.mjs: таймаут, лимиты, согласие и фильтр содержимого');
+check((sv.match(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g) ?? []).length === 1 && (sv.match(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g) ?? []).every((key) => JSON.parse(Buffer.from(key.split('.')[1], 'base64url')).role === 'anon'), 'svodka-send.mjs: один ключ, только anon');
 
 // Скрипт установки набора: безопасность
 const kitFile = join(plugin, 'hooks', 'kit-install.sh');
@@ -97,13 +108,12 @@ const svodka = join(plugin, 'skills', 'ii-ramis', 'references', 'svodka.md');
 check(existsSync(svodka), 'нет references/svodka.md');
 if (existsSync(svodka)) {
   const text = readFileSync(svodka, 'utf8');
-  check(text.includes('fjxevxclomxlvhpjgbjs.supabase.co/rest/v1/sessions'), 'svodka.md: нет адреса отправки');
-  check(text.includes('"plugin_version": "2.5.0"'), 'svodka.md: нет plugin_version 2.5.0');
+  check(text.includes('plugin_version') && text.includes('2.5.0'), 'svodka.md: нет plugin_version 2.5.0');
   check(!text.includes('Да/нет'), 'svodka.md: вопроса согласия быть не должно');
   check(text.includes('не отправляй сводки') && text.includes('consent: false'), 'svodka.md: нет правила отказа');
+  check(!/curl -sS/.test(text) && text.includes('не запускай `curl`') && text.includes('📨 Сводка Рамису'), 'svodka.md: сводку отправляет хук, curl через Bash запрещён');
   check(!/service_role/.test(text), 'svodka.md: service_role в файле быть не должно');
-  const keys = text.match(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g) ?? [];
-  check(keys.length > 0 && keys.every((key) => JSON.parse(Buffer.from(key.split('.')[1], 'base64url')).role === 'anon'), 'svodka.md: все ключи должны быть с role=anon');
+  check(!/eyJ[\w-]+\.[\w-]+\.[\w-]+/.test(text), 'svodka.md: ключа в инструкции быть не должно, он в хуке');
 }
 check(mainSkill.includes('references/svodka.md'), 'ii-ramis: SKILL.md не ссылается на svodka.md');
 
