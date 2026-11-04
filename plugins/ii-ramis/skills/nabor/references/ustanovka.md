@@ -1,12 +1,23 @@
 # Набор урока 5: проверка и установка (Mac и Windows)
 
-Два готовых блока на каждую систему: **проверка** (только читает, ничего не меняет) и **установка** (ставит только то, чего нет, повторный запуск ничего не ломает и не дублирует). Запускай блок целиком одной командой. Версии и коммиты закреплены (`skills@1.7.6`, `@playwright/mcp@0.0.84`, Agent Reach `v1.6.1` с SHA-256, навыки на проверенных коммитах), потому что проверены 03.11.2026: не заменяй их на `@latest` и на ветку `main`.
+Два готовых блока на каждую систему: **проверка** (только читает, ничего не меняет) и **установка** (ставит только то, чего нет, повторный запуск ничего не ломает и не дублирует). Версии и коммиты закреплены (`skills@1.7.6`, `@playwright/mcp@0.0.84`, HyperFrames на коммите `1ff4cef` (тег v0.9.12), Agent Reach `v1.6.1` с SHA-256, навыки на проверенных коммитах), потому что проверены 04.11.2026: не заменяй их на `@latest` и на ветку `main`.
+
+**Mac: установку делает скрипт хука** `hooks/kit-install.sh` (он же единственный источник версий для Mac). Хук SessionStart приложение выполняет вне песочницы, поэтому он может писать в `~/.claude` и `~/.claude.json`, а команды Bash у Claude в Desktop на это права не имеют (см. раздел «Песочница» ниже). Windows: блоки PowerShell ниже, там песочницы для команд нет.
 
 Правила для обоих блоков:
 - ответ на «есть ли X» даёт только блок проверки (диск и список плагинов), не память и не файл `~/.ii-ramis/nabor.json`;
 - ключ 21st в блоках не участвует: см. `klyuch-21st.md`;
 - в `~/.claude/settings.json` блоки ничего не пишут сами (плагины регистрирует `claude plugin`), разрешения и режим «без вопросов» не трогают;
-- переменные `DISABLE_TELEMETRY=1` и `DO_NOT_TRACK=1` выставлены, чтобы установщик навыков не слал статистику.
+- переменные `DISABLE_TELEMETRY=1`, `DO_NOT_TRACK=1` и `HYPERFRAMES_NO_TELEMETRY=1` выставлены, чтобы установщики не слали статистику. Скрипт запускает `npx` из временной папки и берёт пакеты только с официального реестра npm (`NPM_CONFIG_REGISTRY`), чтобы чужой `.npmrc` в папке проекта не подменил источник.
+
+## Песочница Claude Desktop: что можно, что нельзя
+
+Проверено по документации Claude Code (code.claude.com/docs/en/sandboxing, /hooks, /plugins/security, 04.11.2026):
+- Песочница оборачивает команды Bash. Писать им можно в рабочую папку, временную папку и добавленные папки. `~/.claude` (кроме нескольких мелочей) и `~/.claude.json` относятся к **защищённым путям**: запись туда запрещена, даже если добавить путь в `sandbox.filesystem.allowWrite`.
+- Хуки плагинов, локальные MCP-серверы и служебные команды приложения выполняются **вне песочницы**, с обычными правами пользователя.
+- Единственный официальный способ дать Bash-команде выйти за рамки — окно разрешения «Bash command (unsandboxed)»: Claude сам повторяет команду без песочницы, и ученик нажимает «разрешить». Выключать песочницу в настройках и менять `allowUnsandboxedCommands` не нужно и без просьбы ученика нельзя.
+
+Поэтому, если установка через Bash пишет «Operation not permitted» или «Read-only file system»: не обходи (никаких `sudo`, правок `settings.json`, записи через другой путь). Скажи ученику: «Закрой приложение полностью и открой заново: набор поставит сам плагин при запуске, это не требует разрешений. Если я покажу окно «Bash command (unsandboxed)», нажми там «разрешить»: это нормально.»
 
 ## Mac: проверка
 
@@ -22,93 +33,46 @@ command -v claude >/dev/null || echo "claude: НЕ НАЙДЕН в PATH (пла�
 show find-skills has_skill find-skills
 show emil-design-eng has_skill emil-design-eng
 show impeccable has_skill impeccable
+show hyperframes has_skill hyperframes
+show remotion has_skill remotion-best-practices
 show agent-reach has_skill agent-reach
 echo "agent-reach работает: $(agent-reach version 2>/dev/null | head -c 160)"
 show superpowers has_plugin superpowers
 if has_skill humanizer || has_plugin humanizer; then echo "humanizer: есть"; else echo "humanizer: НЕТ"; fi
 if has_mcp playwright || has_plugin playwright; then echo "playwright: есть"; else echo "playwright: НЕТ"; fi
 if has_mcp 21st || has_mcp 21st-magic || has_mcp magic; then echo "21st: подключён (ключ не показываю)"; else echo "21st: НЕТ (нужен личный ключ)"; fi
+if command -v ffmpeg >/dev/null; then echo "ffmpeg: есть"; else echo "ffmpeg: НЕТ (нужен для рендера видео HyperFrames и Remotion)"; fi
+echo "node: $(node -v 2>/dev/null || echo НЕТ)"
+cat "$HOME/.ii-ramis/nabor.json" 2>/dev/null
 ```
 
 Humanizer считается установленным, если есть навык или плагин; Playwright — если есть MCP или плагин. Версия Agent Reach 1.5 и старше считается НЕ установленной (нужна 1.6+: она печатает JSON с `"ok": true`).
 
 ## Mac: установка
 
-Источники закреплены на проверенных коммитах: репозиторий клонируется, переключается на этот коммит и ставится из этой папки, поэтому ставится ровно то, что проверено. Agent Reach скачивается и сверяется по контрольной сумме SHA-256. Если нужного `uv` нет, блок его не ставит сам: см. раздел «Если нет uv».
+Это обычно делает хук при старте сессии (`hooks/kit-install.sh --auto`, асинхронно). Вручную, когда ты в обычном терминале без песочницы или ученик разрешил окно «Bash command (unsandboxed)»:
 
 ```bash install-mac
-export DISABLE_TELEMETRY=1 DO_NOT_TRACK=1
-export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-SKILLS_CLI="skills@1.7.6"
-AR_URL="https://github.com/Panniantong/Agent-Reach/releases/download/v1.6.1/agent-reach.zip"
-AR_SHA256="51443d733bcb26064262442083a8f8abf6ba5e3e7df54beebafe98c88be04a60"
-WORK="$(mktemp -d)" || exit 1
-LOG="$WORK/log.txt"
-trap '[ -n "$WORK" ] && rm -rf "$WORK"' EXIT
-has_skill() { for d in "$HOME/.claude/skills/$1" "$HOME/.claude/skills/synced"/*/"$1"; do [ -f "$d/SKILL.md" ] && return 0; done; return 1; }
-has_plugin() { claude plugin list --json 2>/dev/null | grep -q "\"id\": \"$1@"; }
-MCPS="$(node -e "const fs=require('fs'),os=require('os');let n=[];try{const j=JSON.parse(fs.readFileSync(os.homedir()+'/.claude.json','utf8'));n=Object.keys(j.mcpServers||{});for(const p of Object.values(j.projects||{}))n.push(...Object.keys(p.mcpServers||{}))}catch(e){}console.log(n.join(' '))" 2>/dev/null)"
-has_mcp() { case " $MCPS " in *" $1 "*) return 0;; esac; return 1; }
-FAILS=0
-ok()    { echo "уже стоит: $1"; }
-done_() { echo "поставил: $1"; }
-fail()  { echo "НЕ ПОСТАВИЛОСЬ: $1 ($2)"; tail -n 3 "$LOG" 2>/dev/null | sed 's/^/    /'; FAILS=$((FAILS+1)); }
-
-skill_pinned() { # репозиторий, коммит, имя навыка
-  if has_skill "$3"; then ok "$3"; return; fi
-  : >"$LOG"
-  git clone -q "https://github.com/$1.git" "$WORK/$3" >>"$LOG" 2>&1 && git -C "$WORK/$3" checkout -q "$2" >>"$LOG" 2>&1 \
-    && npx --yes "$SKILLS_CLI" add "$WORK/$3" --skill "$3" -g -a claude-code -y --copy >>"$LOG" 2>&1
-  if has_skill "$3"; then done_ "$3"; else fail "$3" "нужны git и Node 22.20 или новее"; fi
-}
-
-skill_pinned vercel-labs/skills 7a5e920bead4b1039a6d6df5d7e1163b7b09423a find-skills
-skill_pinned emilkowalski/skills f1090bec277140d02ed202440185ad9d02ac1490 emil-design-eng
-skill_pinned pbakaus/impeccable 9fadc41729c38fd47d7ae622b501558653f9d2e9 impeccable
-skill_pinned blader/humanizer 0ef9fe5bc3572734fd3ae6c448fe00a30cd5dcf0 humanizer
-
-if has_plugin superpowers; then ok superpowers
-elif ! command -v claude >/dev/null; then fail superpowers "команда claude не найдена"
-else
-  : >"$LOG"
-  claude plugin marketplace add anthropics/claude-plugins-official >>"$LOG" 2>&1
-  claude plugin install superpowers@claude-plugins-official >>"$LOG" 2>&1
-  if has_plugin superpowers; then done_ superpowers; else fail superpowers "claude plugin install superpowers@claude-plugins-official"; fi
-fi
-
-if has_mcp playwright || has_plugin playwright; then ok playwright
-elif ! command -v claude >/dev/null; then fail playwright "команда claude не найдена"
-else
-  : >"$LOG"
-  claude mcp add --scope user playwright -- npx @playwright/mcp@0.0.84 >>"$LOG" 2>&1
-  if claude mcp list 2>/dev/null | grep -q "^playwright:"; then done_ playwright; else fail playwright "claude mcp add playwright"; fi
-fi
-
-ar_ready() { has_skill agent-reach && agent-reach version 2>/dev/null | grep -q '"ok": true'; }
-if ar_ready; then ok agent-reach
-elif ! command -v uv >/dev/null; then echo "ЖДЁТ uv: agent-reach (спроси ученика, см. «Если нет uv»)"; FAILS=$((FAILS+1))
-else
-  : >"$LOG"
-  curl -fsSL -o "$WORK/ar.zip" "$AR_URL" >>"$LOG" 2>&1
-  if [ "$(shasum -a 256 "$WORK/ar.zip" 2>/dev/null | cut -d' ' -f1)" = "$AR_SHA256" ]; then
-    uv tool install --force "$WORK/ar.zip" >>"$LOG" 2>&1 && agent-reach setup >>"$LOG" 2>&1
-  else
-    echo "контрольная сумма Agent Reach не совпала, не ставлю" >>"$LOG"
-  fi
-  if ar_ready; then done_ agent-reach; else fail agent-reach "uv tool install из релиза v1.6.1"; fi
-fi
-
-has_mcp 21st || has_mcp 21st-magic || has_mcp magic || echo "ждёт ключ: 21st (см. klyuch-21st.md)"
-mkdir -p "$HOME/.ii-ramis"
-PREV="$(grep -o '"tries": *[0-9]*' "$HOME/.ii-ramis/nabor.json" 2>/dev/null | grep -o '[0-9]*$')"
-if [ "$FAILS" -eq 0 ]; then STATUS=ok; else STATUS=partial; fi
-printf '{"kit":"2.4.0","lesson":5,"status":"%s","tries":%s}\n' "$STATUS" "$(( ${PREV:-0} + 1 ))" > "$HOME/.ii-ramis/nabor.json"
-echo "ошибок: $FAILS"
+bash "$(ls -d "$HOME"/.claude/plugins/cache/ii-ramis/ii-ramis/*/ | sort -V | tail -1)hooks/kit-install.sh" --run
 ```
+
+Скрипт делает то же, что раньше делал блок: навыки ставятся из клона, переключённого на закреплённый коммит (репозиторий без символических ссылок), Agent Reach скачивается и сверяется по SHA-256, `uv` скрипт не ставит (см. «Если нет uv»). Что нового в 2.5:
+- **HyperFrames** (HeyGen): основной набор из четырёх навыков (hyperframes, hyperframes-cli, hyperframes-registry, media-use) ставится из клона репозитория на закреплённом коммите `1ff4cef` (тег v0.9.12), как остальные навыки. Собственный установщик HyperFrames (`hyperframes skills update`) НЕ используется: он тянет другую версию `skills` и ссылки на тег. Сам CLI `hyperframes` не ставится; при первом `npx hyperframes` статистика у него включена по умолчанию, поэтому ученику при работе с видео скажи про `HYPERFRAMES_NO_TELEMETRY=1` или `hyperframes telemetry disable`.
+- **Remotion**: навыки репозитория `remotion-dev/skills` (13 штук, главный `remotion-best-practices`) на коммите `c7cb2fd`.
+- Предварительные условия проверяются, но не ломают остальное: нет Node 22.20+ или git — навыки через `npx` честно пишутся как не поставленные, `superpowers` и `playwright` ставятся отдельно; нет `ffmpeg` — это не ошибка установки, скрипт записывает `ffmpeg` в `notes`.
+- Состояние пишется в `~/.ii-ramis/nabor.json`: `status` (`installing`, `ok`, `partial`, `declined`), `tries`, `missing` (что не поставилось), `notes` (`ffmpeg`, `uv`, `node`, `git`, `claude`, `21st`). Журнал последней установки: `~/.ii-ramis/nabor.log`.
+- «Уже поставлено» — это `status: ok` с `kit` не ниже `2.5.0`: хук молчит и ничего не запускает. Отказ — `status: declined`: хук молчит, скрипт останавливается на следующем шаге. `II_RAMIS_NO_KIT=1` в окружении отключает хук совсем.
 
 После установки навыкам нужна новая сессия (или `/reload-plugins` для плагинов): текущая сессия новые навыки не подхватит.
 
-`superpowers` ставится из маркетплейса Anthropic `claude-plugins-official`, где коммит плагина закреплён самим маркетплейсом. Humanizer ставится как навык (не как плагин из чужого маркетплейса), чтобы не получить чужие хуки и автообновление. Временная папка с клонами удаляется при выходе, файл `nabor.json` хранит статус и число попыток (`status: partial` и `tries` от 3 значит: сам больше не повторяй, только по просьбе ученика).
+`superpowers` ставится из маркетплейса Anthropic `claude-plugins-official`, где коммит плагина закреплён самим маркетплейсом. Humanizer ставится как навык (не как плагин из чужого маркетплейса), чтобы не получить чужие хуки и автообновление. Временная папка с клонами удаляется при выходе. `status: partial` и `tries` от 3 значит: сам больше не повторяй, только по просьбе ученика.
+
+### Что сказать про `notes`
+
+- `ffmpeg`: «Для рендера видео (HyperFrames, Remotion) нужна программа ffmpeg, её у тебя пока нет. Скажи мне «поставь ffmpeg»: я поставлю через Homebrew, если он есть (`brew install ffmpeg`), только после твоего «да». Остальной набор от этого не зависит». Сам не ставь.
+- `node`: «Нужен Node.js 22.20 или новее для части набора. Скачай с nodejs.org (кнопка LTS), установи двойным щелчком и перезапусти приложение: недостающее докачается само».
+- `git`: Mac предложит «Установить инструменты разработчика» — нажать «Установить», потом перезапустить.
+- `uv`: см. следующий раздел. `claude`: см. «Если `claude` не найден в PATH». `21st`: см. `klyuch-21st.md`.
 
 ## Если нет uv
 
@@ -129,11 +93,15 @@ if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { "claude: НЕ Н�
 Show 'find-skills' (Has-Skill 'find-skills')
 Show 'emil-design-eng' (Has-Skill 'emil-design-eng')
 Show 'impeccable' (Has-Skill 'impeccable')
+Show 'hyperframes' (Has-Skill 'hyperframes')
+Show 'remotion' (Has-Skill 'remotion-best-practices')
 Show 'agent-reach' (Has-Skill 'agent-reach')
 Show 'superpowers' (Has-Plugin 'superpowers')
 Show 'humanizer' ((Has-Skill 'humanizer') -or (Has-Plugin 'humanizer'))
 Show 'playwright' (($mcps -contains 'playwright') -or (Has-Plugin 'playwright'))
 if (($mcps -contains '21st') -or ($mcps -contains '21st-magic') -or ($mcps -contains 'magic')) { "21st: подключён (ключ не показываю)" } else { "21st: НЕТ (нужен личный ключ)" }
+if (Get-Command ffmpeg -ErrorAction SilentlyContinue) { 'ffmpeg: есть' } else { 'ffmpeg: НЕТ (нужен для рендера видео HyperFrames и Remotion)' }
+"node: $(try { node -v } catch { 'НЕТ' })"
 ```
 
 ## Windows: установка
@@ -141,7 +109,7 @@ if (($mcps -contains '21st') -or ($mcps -contains '21st-magic') -or ($mcps -cont
 То же, что на Mac: закреплённые коммиты, SHA-256 для Agent Reach, `uv` блок сам не ставит. (Не проверено на реальной Windows.)
 
 ```powershell install-win
-$env:DISABLE_TELEMETRY = '1'; $env:DO_NOT_TRACK = '1'
+$env:DISABLE_TELEMETRY = '1'; $env:DO_NOT_TRACK = '1'; $env:HYPERFRAMES_NO_TELEMETRY = '1'; $env:HYPERFRAMES_NO_UPDATE_CHECK = '1'
 $env:Path = [Environment]::GetEnvironmentVariable('Path','User') + ';' + [Environment]::GetEnvironmentVariable('Path','Machine') + ";$HOME\.local\bin"
 $SkillsCli = 'skills@1.7.6'
 $ArUrl = 'https://github.com/Panniantong/Agent-Reach/releases/download/v1.6.1/agent-reach.zip'
@@ -170,6 +138,27 @@ Skill-Pinned 'emilkowalski/skills' 'f1090bec277140d02ed202440185ad9d02ac1490' 'e
 Skill-Pinned 'pbakaus/impeccable' '9fadc41729c38fd47d7ae622b501558653f9d2e9' 'impeccable'
 Skill-Pinned 'blader/humanizer' '0ef9fe5bc3572734fd3ae6c448fe00a30cd5dcf0' 'humanizer'
 
+# Remotion: все навыки репозитория на закреплённом коммите (имя навыка '*', проверка по remotion-best-practices)
+if (Has-Skill 'remotion-best-practices') { Ok 'remotion' }
+else {
+  $rdir = Join-Path $Work 'remotion'
+  git clone -q 'https://github.com/remotion-dev/skills.git' $rdir *> $null
+  git -C $rdir checkout -q 'c7cb2fdcacd134fb2ccb9b7a44f9ffa44e467271' *> $null
+  npx.cmd --yes $SkillsCli add $rdir --skill '*' -g -a claude-code -y --copy *> $null
+  if (Has-Skill 'remotion-best-practices') { Done 'remotion' } else { Fail 'remotion' 'нужны git и Node 22.20 или новее' }
+}
+
+# HyperFrames: основной набор навыков от HeyGen из клона на закреплённом коммите
+if ((Has-Skill 'hyperframes') -and (Has-Skill 'hyperframes-cli')) { Ok 'hyperframes' }
+else {
+  $hdir = Join-Path $Work 'hyperframes'
+  git clone -q 'https://github.com/heygen-com/hyperframes.git' $hdir *> $null
+  git -C $hdir checkout -q '1ff4cefd40c8dad98127fc78e8761c1ac62053dd' *> $null
+  npx.cmd --yes $SkillsCli add $hdir --skill hyperframes hyperframes-cli hyperframes-registry media-use -g -a claude-code -y --copy *> $null
+  if ((Has-Skill 'hyperframes') -and (Has-Skill 'hyperframes-cli')) { Done 'hyperframes' } else { Fail 'hyperframes' 'нужен Node 22 или новее' }
+}
+if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { 'нет ffmpeg: нужен для рендера видео, скажи ученику как поставить (только с его «да»)' }
+
 if (Has-Plugin 'superpowers') { Ok 'superpowers' }
 elseif (-not (Get-Command claude -ErrorAction SilentlyContinue)) { Fail 'superpowers' 'команда claude не найдена' }
 else {
@@ -181,7 +170,10 @@ else {
 if (((Get-McpNames) -contains 'playwright') -or (Has-Plugin 'playwright')) { Ok 'playwright' }
 elseif (-not (Get-Command claude -ErrorAction SilentlyContinue)) { Fail 'playwright' 'команда claude не найдена' }
 else {
-  claude mcp add --scope user playwright -- npx.cmd '@playwright/mcp@0.0.84' *> $null
+  $mcpPrefix = "$HOME\.ii-ramis\mcp"
+  New-Item -ItemType Directory -Force $mcpPrefix | Out-Null
+  npm.cmd install --prefix $mcpPrefix --registry https://registry.npmjs.org/ --userconfig NUL --ignore-scripts --no-audit --no-fund '@playwright/mcp@0.0.84' *> $null
+  if (Test-Path "$mcpPrefix\node_modules\.bin\playwright-mcp.cmd") { claude mcp add --scope user playwright -- "$mcpPrefix\node_modules\.bin\playwright-mcp.cmd" *> $null }
   if ((Get-McpNames) -contains 'playwright') { Done 'playwright' } else { Fail 'playwright' 'claude mcp add playwright' }
 }
 
@@ -200,7 +192,7 @@ if (-not (($names -contains '21st') -or ($names -contains '21st-magic') -or ($na
 New-Item -ItemType Directory -Force "$HOME\.ii-ramis" | Out-Null
 $prev = 0; try { $prev = [int](Get-Content -LiteralPath "$HOME\.ii-ramis\nabor.json" -Raw | ConvertFrom-Json).tries } catch {}
 $status = if ($script:Fails -eq 0) { 'ok' } else { 'partial' }
-('{"kit":"2.4.0","lesson":5,"status":"' + $status + '","tries":' + ($prev + 1) + '}') | Set-Content -LiteralPath "$HOME\.ii-ramis\nabor.json"
+('{"kit":"2.5.0","lesson":5,"status":"' + $status + '","tries":' + ($prev + 1) + ',"missing":"","notes":""}') | Set-Content -LiteralPath "$HOME\.ii-ramis\nabor.json"
 Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue
 "ошибок: $($script:Fails)"
 ```
@@ -211,4 +203,4 @@ Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue
 
 ## Сколько это занимает и весит
 
-Установка 1–3 минуты, один раз. На диске около 180 МБ, почти всё это Agent Reach (140 МБ, из них yt-dlp и bili-cli). Playwright при первом использовании докачивает браузер Chromium (около 200 МБ), это нормально: предупреди ученика словами «докачаю браузер для проверок».
+Установка 2–5 минут, один раз. На диске около 200 МБ, почти всё это Agent Reach (140 МБ, из них yt-dlp и bili-cli); HyperFrames и Remotion добавляют по несколько мегабайт навыков. Рендер видео потом докачивает браузер (около 200 МБ) и требует ffmpeg. Playwright при первом использовании докачивает браузер Chromium (около 200 МБ), это нормально: предупреди ученика словами «докачаю браузер для проверок».
