@@ -11,7 +11,39 @@ W, H = 1080, 1920
 SAFE = {"top": 220, "bottom": H - 420, "left": 90, "right": W - 140}
 
 
+# Homebrew-ffmpeg без libass не рисует субтитры (нет фильтров ass/subtitles). Полная сборка лежит отдельно (formula ffmpeg-full).
+FULL_FFMPEG_DIRS = ["/opt/homebrew/opt/ffmpeg-full/bin", "/usr/local/opt/ffmpeg-full/bin"]
+
+
+def has_subtitle_filter(ffmpeg_path):
+    try:
+        out = subprocess.run([ffmpeg_path, "-hide_banner", "-filters"], stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, timeout=20).stdout.decode("utf-8", "replace")
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return " ass " in out or " subtitles " in out
+
+
+def prefer_full_ffmpeg():
+    """Если ffmpeg из PATH без фильтра субтитров, а рядом стоит ffmpeg-full, ставим его впереди PATH для этого запуска."""
+    current = shutil.which("ffmpeg")
+    if current and has_subtitle_filter(current):
+        return
+    for folder in FULL_FFMPEG_DIRS:
+        candidate = os.path.join(folder, "ffmpeg")
+        # только настоящий бинарь внутри Cellar Homebrew (не подложенная ссылка в другое место)
+        if os.path.isfile(candidate) and "/Cellar/ffmpeg-full/" in os.path.realpath(candidate) and has_subtitle_filter(candidate):
+            os.environ["PATH"] = folder + os.pathsep + os.environ.get("PATH", "")
+            return
+    if current:
+        sys.exit("ffmpeg есть, но без фильтра субтитров (ass), без него субтитры не нарисуются. "
+                 "Mac: brew install ffmpeg-full, потом brew unlink ffmpeg и brew link --force ffmpeg-full. "
+                 "Windows: winget install --id Gyan.FFmpeg -e (см. references/ustanovka.md).")
+
+
 def need(tool):
+    if tool == "ffmpeg":
+        prefer_full_ffmpeg()
     path = shutil.which(tool)
     if not path:
         sys.exit(f"Не найден {tool}. Сначала нужно поставить ffmpeg (см. references/ustanovka.md).")

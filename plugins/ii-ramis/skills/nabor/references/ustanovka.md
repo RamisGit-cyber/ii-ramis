@@ -1,6 +1,6 @@
 # Набор урока 5: проверка и установка (Mac и Windows)
 
-Два готовых блока на каждую систему: **проверка** (только читает, ничего не меняет) и **установка** (ставит только то, чего нет, повторный запуск ничего не ломает и не дублирует). Версии и коммиты закреплены (`skills@1.7.6`, `@playwright/mcp@0.0.84`, HyperFrames на коммите `1ff4cef` (тег v0.9.12), Agent Reach `v1.6.1` с SHA-256, навыки на проверенных коммитах), потому что проверены 04.11.2026: не заменяй их на `@latest` и на ветку `main`.
+Два готовых блока на каждую систему: **проверка** (только читает, ничего не меняет) и **установка** (ставит только то, чего нет, повторный запуск ничего не ломает и не дублирует). Версии и коммиты закреплены (`skills@1.7.6`, `@playwright/mcp@0.0.84`, HyperFrames на коммите `b4cc674` (тег v0.9.19), Agent Reach `v1.6.1` с SHA-256, навыки на проверенных коммитах), потому что проверены 04.11.2026: не заменяй их на `@latest` и на ветку `main`.
 
 **Mac: установку делает скрипт хука** `hooks/kit-install.sh` (он же единственный источник версий для Mac). Хук SessionStart приложение выполняет вне песочницы, поэтому он может писать в `~/.claude` и `~/.claude.json`, а команды Bash у Claude в Desktop на это права не имеют (см. раздел «Песочница» ниже). Windows: блоки PowerShell ниже, там песочницы для команд нет.
 
@@ -36,6 +36,11 @@ show impeccable has_skill impeccable
 show hyperframes has_skill hyperframes
 show remotion has_skill remotion-best-practices
 show gsap has_skill gsap-core
+show apple-design has_skill apple-design
+show ffmpeg-skill has_skill ffmpeg-skill
+show teardown has_skill teardown
+show anatomy has_skill anatomy
+show gamedev-web has_skill phaser-core
 show agent-reach has_skill agent-reach
 echo "agent-reach работает: $(agent-reach version 2>/dev/null | head -c 160)"
 show superpowers has_plugin superpowers
@@ -43,6 +48,8 @@ if has_skill humanizer || has_plugin humanizer; then echo "humanizer: есть";
 if has_mcp playwright || has_plugin playwright; then echo "playwright: есть"; else echo "playwright: НЕТ"; fi
 if has_mcp 21st || has_mcp 21st-magic || has_mcp magic; then echo "21st: подключён (ключ не показываю)"; else echo "21st: НЕТ (нужен личный ключ)"; fi
 if command -v ffmpeg >/dev/null; then echo "ffmpeg: есть"; else echo "ffmpeg: НЕТ (нужен для рендера видео HyperFrames и Remotion)"; fi
+if command -v ffmpeg >/dev/null; then ffmpeg -hide_banner -filters 2>/dev/null | grep -qE ' (ass|subtitles) ' && echo "ffmpeg, субтитры: есть" || echo "ffmpeg, субтитры: НЕТ (без них монтаж не нарисует субтитры; нужен ffmpeg-full)"; fi
+if [ -x "$HOME/.ii-ramis/earshot/bin/earshot" ] || command -v earshot >/dev/null; then echo "earshot: есть (по желанию)"; else echo "earshot: нет (по желанию, не обязателен)"; fi
 echo "node: $(node -v 2>/dev/null || echo НЕТ)"
 cat "$HOME/.ii-ramis/nabor.json" 2>/dev/null
 ```
@@ -58,11 +65,13 @@ bash "$(ls -d "$HOME"/.claude/plugins/cache/ii-ramis/ii-ramis/*/ | sort -V | tai
 ```
 
 Скрипт делает то же, что раньше делал блок: навыки ставятся из клона, переключённого на закреплённый коммит (репозиторий без символических ссылок), Agent Reach скачивается и сверяется по SHA-256, `uv` скрипт не ставит (см. «Если нет uv»). Что нового в 2.5:
-- **HyperFrames** (HeyGen): основной набор из четырёх навыков (hyperframes, hyperframes-cli, hyperframes-registry, media-use) ставится из клона репозитория на закреплённом коммите `1ff4cef` (тег v0.9.12), как остальные навыки. Собственный установщик HyperFrames (`hyperframes skills update`) НЕ используется: он тянет другую версию `skills` и ссылки на тег. Сам CLI `hyperframes` не ставится; при первом `npx hyperframes` статистика у него включена по умолчанию, поэтому ученику при работе с видео скажи про `HYPERFRAMES_NO_TELEMETRY=1` или `hyperframes telemetry disable`.
+- **HyperFrames** (HeyGen): основной набор из четырёх навыков (hyperframes, hyperframes-cli, hyperframes-registry, media-use) ставится из клона репозитория на закреплённом коммите `b4cc674` (тег v0.9.19), как остальные навыки. Собственный установщик HyperFrames (`hyperframes skills update`) НЕ используется: он тянет другую версию `skills` и ссылки на тег. Сам CLI `hyperframes` не ставится; при первом `npx hyperframes` статистика у него включена по умолчанию, поэтому ученику при работе с видео скажи про `HYPERFRAMES_NO_TELEMETRY=1` или `hyperframes telemetry disable`.
 - **Remotion**: навыки репозитория `remotion-dev/skills` (13 штук, главный `remotion-best-practices`) на коммите `c7cb2fd`.
 - Предварительные условия проверяются, но не ломают остальное: нет Node 22.20+ или git — навыки через `npx` честно пишутся как не поставленные, `superpowers` и `playwright` ставятся отдельно; нет `ffmpeg` — это не ошибка установки, скрипт записывает `ffmpeg` в `notes`. С 2.6: на Mac с Homebrew хук сам ставит Node (`brew install node`, только если Node нет совсем; старый Node молча не обновляется, а попадает в `notes`, и ИИ Рамис предлагает обновить с «да» ученика) и `ffmpeg` (`brew install ffmpeg`) без вопросов, это домашка урока 5; на Windows это делает блок ниже через `winget` (`OpenJS.NodeJS.LTS`, `Gyan.FFmpeg`).
-- Состояние пишется в `~/.ii-ramis/nabor.json`: `status` (`installing`, `ok`, `partial`, `declined`), `tries`, `missing` (что не поставилось), `notes` (`ffmpeg`, `uv`, `node`, `git`, `claude`, `21st`). Журнал последней установки: `~/.ii-ramis/nabor.log`.
-- «Уже поставлено» — это `status: ok` с `kit` не ниже `2.6.0`: хук молчит и ничего не запускает. Отказ — `status: declined`: хук молчит, скрипт останавливается на следующем шаге. `II_RAMIS_NO_KIT=1` в окружении отключает хук совсем.
+- Состояние пишется в `~/.ii-ramis/nabor.json`: `status` (`installing`, `ok`, `partial`, `declined`), `tries`, `missing` (что не поставилось), `notes` (`ffmpeg`, `ffmpegsubs`, `python`, `uv`, `node`, `git`, `claude`, `21st`). Журнал последней установки: `~/.ii-ramis/nabor.log`.
+- «Уже поставлено» — это `status: ok` с `kit` не ниже `2.7.0`: хук молчит и ничего не запускает. Отказ — `status: declined`: хук молчит, скрипт останавливается на следующем шаге. `II_RAMIS_NO_KIT=1` в окружении отключает хук совсем.
+
+- **Новое в 2.7**: ffmpeg-skill (коммит `9bdb444`, v3.2.0, установщик автора из клона), Teardown (`a91262a`), Anatomy (`1482e84`, без `publish.mjs`), веб-движки игр и роутер (`19d93f9`). Mac: хук проверяет, что у `ffmpeg` есть фильтр субтитров (`ass`), и если нет, ставит `brew install ffmpeg-full` и делает его основным (`brew unlink ffmpeg`, `brew link --force ffmpeg-full`; при неудаче ссылка на `ffmpeg` возвращается). Не проверено на реальном Mac в плагине: сверяй вывод `ffmpeg -filters` после установки.
 
 После установки навыкам нужна новая сессия (или `/reload-plugins` для плагинов): текущая сессия новые навыки не подхватит.
 
@@ -71,6 +80,8 @@ bash "$(ls -d "$HOME"/.claude/plugins/cache/ii-ramis/ii-ramis/*/ | sort -V | tai
 ### Что сказать про `notes`
 
 - `ffmpeg`: «Для рендера видео (HyperFrames, Remotion) нужна программа ffmpeg, её у тебя пока нет. Если у тебя есть Homebrew, плагин поставит её сам при следующем запуске; если нет, скачай сборку для Mac с ffmpeg.org/download.html (раздел macOS) или скажи Рамису на уроке. Остальной набор от этого не зависит».
+- `ffmpegsubs`: «У тебя стоит ffmpeg без субтитров (так бывает у обычной сборки Homebrew), монтаж не сможет нарисовать подписи. Нужна полная сборка: на Mac плагин ставит `ffmpeg-full` сам, если есть Homebrew (несколько минут); на Windows `winget install --id Gyan.FFmpeg -e` и перезапуск приложения».
+- `python`: «Для видеоредактора ffmpeg-skill нужен Python 3.10 или новее: на Mac он ставится вместе с «инструментами разработчика», на Windows `winget install --id Python.Python.3.12 -e` (только после «да» ученика)».
 - `node`: «Нужен Node.js 22.20 или новее для части набора. Скачай с nodejs.org (кнопка LTS), установи двойным щелчком и перезапусти приложение: недостающее докачается само».
 - `git`: Mac предложит «Установить инструменты разработчика» — нажать «Установить», потом перезапустить.
 - `uv`: см. следующий раздел. `claude`: см. «Если `claude` не найден в PATH». `21st`: см. `klyuch-21st.md`.
@@ -97,12 +108,18 @@ Show 'impeccable' (Has-Skill 'impeccable')
 Show 'hyperframes' (Has-Skill 'hyperframes')
 Show 'remotion' (Has-Skill 'remotion-best-practices')
 Show 'gsap' (Has-Skill 'gsap-core')
+Show 'apple-design' (Has-Skill 'apple-design')
+Show 'ffmpeg-skill' (Has-Skill 'ffmpeg-skill')
+Show 'teardown' (Has-Skill 'teardown')
+Show 'anatomy' (Has-Skill 'anatomy')
+Show 'gamedev-web' (Has-Skill 'phaser-core')
 Show 'agent-reach' (Has-Skill 'agent-reach')
 Show 'superpowers' (Has-Plugin 'superpowers')
 Show 'humanizer' ((Has-Skill 'humanizer') -or (Has-Plugin 'humanizer'))
 Show 'playwright' (($mcps -contains 'playwright') -or (Has-Plugin 'playwright'))
 if (($mcps -contains '21st') -or ($mcps -contains '21st-magic') -or ($mcps -contains 'magic')) { "21st: подключён (ключ не показываю)" } else { "21st: НЕТ (нужен личный ключ)" }
 if (Get-Command ffmpeg -ErrorAction SilentlyContinue) { 'ffmpeg: есть' } else { 'ffmpeg: НЕТ (нужен для рендера видео HyperFrames и Remotion)' }
+if (Get-Command ffmpeg -ErrorAction SilentlyContinue) { if ((ffmpeg -hide_banner -filters 2>$null | Select-String -Pattern ' (ass|subtitles) ' -Quiet)) { 'ffmpeg, субтитры: есть' } else { 'ffmpeg, субтитры: НЕТ (нужна полная сборка Gyan.FFmpeg через winget)' } }
 "node: $(try { node -v } catch { 'НЕТ' })"
 ```
 
@@ -145,6 +162,11 @@ function Skill-Pinned($repo, $sha, $name) {
 Skill-Pinned 'vercel-labs/skills' '7a5e920bead4b1039a6d6df5d7e1163b7b09423a' 'find-skills'
 Skill-Pinned 'emilkowalski/skills' 'f1090bec277140d02ed202440185ad9d02ac1490' 'emil-design-eng'
 Skill-Pinned 'pbakaus/impeccable' '9fadc41729c38fd47d7ae622b501558653f9d2e9' 'impeccable'
+Skill-Pinned 'emilkowalski/skills' 'f1090bec277140d02ed202440185ad9d02ac1490' 'apple-design'
+Skill-Pinned 'emilkowalski/skills' 'f1090bec277140d02ed202440185ad9d02ac1490' 'animate'
+Skill-Pinned 'emilkowalski/skills' 'f1090bec277140d02ed202440185ad9d02ac1490' 'animation-vocabulary'
+Skill-Pinned 'emilkowalski/skills' 'f1090bec277140d02ed202440185ad9d02ac1490' 'find-animation-opportunities'
+Skill-Pinned 'emilkowalski/skills' 'f1090bec277140d02ed202440185ad9d02ac1490' 'improve-animations'
 Skill-Pinned 'blader/humanizer' '0ef9fe5bc3572734fd3ae6c448fe00a30cd5dcf0' 'humanizer'
 
 # Remotion: все навыки репозитория на закреплённом коммите (имя навыка '*', проверка по remotion-best-practices)
@@ -174,10 +196,42 @@ if ((Has-Skill 'hyperframes') -and (Has-Skill 'hyperframes-cli')) { Ok 'hyperfra
 else {
   $hdir = Join-Path $Work 'hyperframes'
   git clone -q 'https://github.com/heygen-com/hyperframes.git' $hdir *> $null
-  git -C $hdir checkout -q '1ff4cefd40c8dad98127fc78e8761c1ac62053dd' *> $null
+  git -C $hdir checkout -q 'b4cc674f7f312e77ded32e0b53006cc0bad6723b' *> $null
   npx.cmd --yes $SkillsCli add $hdir --skill hyperframes hyperframes-cli hyperframes-registry media-use -g -a claude-code -y --copy *> $null
   if ((Has-Skill 'hyperframes') -and (Has-Skill 'hyperframes-cli')) { Done 'hyperframes' } else { Fail 'hyperframes' 'нужен Node 22 или новее' }
 }
+# Новое в 2.7: Teardown, Anatomy, веб-движки игр (на закреплённых коммитах), ffmpeg-skill (установщик автора из клона)
+function Clone-Pinned($repo, $sha, $dirName) {
+  $d = Join-Path $Work $dirName
+  git clone -q --no-recurse-submodules -c protocol.file.allow=never "https://github.com/$repo.git" $d *> $null
+  if ($LASTEXITCODE -ne 0) { return $null }
+  git -C $d checkout -q $sha *> $null
+  if ($LASTEXITCODE -ne 0) { return $null }
+  $l = @(Get-ChildItem -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and $_.FullName -notmatch '[\\/]\.git[\\/]' })
+  if ($l.Count -gt 0) { return $null }
+  return $d
+}
+if (Has-Skill 'teardown') { Ok 'teardown' } else {
+  $d = Clone-Pinned 'elvarofficial/teardown' 'a91262ac1109051e014662d42ecb0b7bc1f113b1' 'teardown'
+  if ($d) { npx.cmd --yes $SkillsCli add $d --skill teardown -g -a claude-code -y --copy *> $null }
+  if (Has-Skill 'teardown') { Done 'teardown' } else { Fail 'teardown' 'нужны git и Node 22.20 или новее, или символические ссылки в репозитории' }
+}
+if (Has-Skill 'anatomy') { Ok 'anatomy' } else {
+  $d = Clone-Pinned 'wheresryan22/anatomy' '1482e8469b0a9e0d8cc18ea2740a01423d29ae80' 'anatomy'
+  if ($d) { Remove-Item -LiteralPath "$d\scripts\publish.mjs", "$d\scripts\publish.test.mjs" -Force -ErrorAction SilentlyContinue; npx.cmd --yes $SkillsCli add $d --skill anatomy -g -a claude-code -y --copy *> $null }
+  if (Has-Skill 'anatomy') { Done 'anatomy' } else { Fail 'anatomy' 'нужны git и Node 22.20 или новее, или символические ссылки в репозитории' }
+}
+if (Has-Skill 'phaser-core') { Ok 'gamedev-web' } else {
+  $d = Clone-Pinned 'gamedev-skills/awesome-gamedev-agent-skills' '19d93f97c9c1ea0f8b306e77aa81e0d3e352d3e9' 'gamedev'
+  if ($d) { npx.cmd --yes $SkillsCli add $d --skill router phaser-core phaser-arcade-physics pixijs-rendering threejs-scene-setup threejs-gltf-loading threejs-materials-lighting -g -a claude-code -y --copy *> $null }
+  if (Has-Skill 'phaser-core') { Done 'gamedev-web' } else { Fail 'gamedev-web' 'нужны git и Node 22.20 или новее' }
+}
+if (Has-Skill 'ffmpeg-skill') { Ok 'ffmpeg-skill' } else {
+  $d = Clone-Pinned 'kajisho5/ffmpeg-skill' '9bdb444fdd569bcf50276337b36164fadf54b363' 'ffmpeg-skill'
+  if ($d) { node "$d\bin\install.js" --claude *> $null }
+  if (Has-Skill 'ffmpeg-skill') { Done 'ffmpeg-skill' } else { Fail 'ffmpeg-skill' 'нужны git и Node 22.20 или новее' }
+}
+if ((Get-Command ffmpeg -ErrorAction SilentlyContinue) -and -not (ffmpeg -hide_banner -filters 2>$null | Select-String -Pattern ' (ass|subtitles) ' -Quiet)) { 'ffmpeg без фильтра субтитров: скажи ученику, что нужна полная сборка Gyan.FFmpeg через winget и перезапуск приложения, иначе субтитры монтажа не нарисуются' }
 if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { 'нет ffmpeg: winget не поставил, скажи ученику: закрыть и открыть приложение, потом повторить; иначе скачать сборку с gyan.dev/ffmpeg/builds' }
 
 if (Has-Plugin 'superpowers') { Ok 'superpowers' }
@@ -213,10 +267,25 @@ if (-not (($names -contains '21st') -or ($names -contains '21st-magic') -or ($na
 New-Item -ItemType Directory -Force "$HOME\.ii-ramis" | Out-Null
 $prev = 0; try { $prev = [int](Get-Content -LiteralPath "$HOME\.ii-ramis\nabor.json" -Raw | ConvertFrom-Json).tries } catch {}
 $status = if ($script:Fails -eq 0) { 'ok' } else { 'partial' }
-('{"kit":"2.6.0","lesson":5,"status":"' + $status + '","tries":' + ($prev + 1) + ',"missing":"","notes":""}') | Set-Content -LiteralPath "$HOME\.ii-ramis\nabor.json"
+('{"kit":"2.7.0","lesson":5,"status":"' + $status + '","tries":' + ($prev + 1) + ',"missing":"","notes":""}') | Set-Content -LiteralPath "$HOME\.ii-ramis\nabor.json"
 Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue
 "ошибок: $($script:Fails)"
 ```
+
+## Earshot по желанию (не ставится автоматически)
+
+Earshot (github.com/Leonxlnx/earshot, MIT, v0.4.0 = коммит `591fa3e`) даёт Claude «уши»: описать звук словами, найти нужный момент в записи, подобрать эффекты. Для него нужны Python 3.10+, ~1,5 ГБ пакетов (torch и др.) и ещё ~1,1 ГБ моделей (CLAP и AST, скачиваются один раз с Hugging Face на закреплённых версиях), каждый вызов из консоли грузит модели 20–40 секунд, через MCP быстрее. Ключей и аккаунтов не нужно, всё считается на компьютере. Предлагай только если ученик просит работу со звуком, назови цену («около 3 ГБ места и 10–15 минут»), ставь после «да»:
+
+```bash
+# Mac или Linux; нужен uv. Одно окружение в своей папке, без прав администратора
+uv venv ~/.ii-ramis/earshot --python 3.12
+uv pip install --python ~/.ii-ramis/earshot/bin/python torch --index-url https://download.pytorch.org/whl/cpu
+uv pip install --python ~/.ii-ramis/earshot/bin/python "git+https://github.com/Leonxlnx/earshot@591fa3e028032e6dce56620a20e932e35667e8d8" "mcp>=2,<3"
+~/.ii-ramis/earshot/bin/earshot doctor --fetch
+claude mcp add --scope user earshot -- ~/.ii-ramis/earshot/bin/python -m earshot mcp
+```
+
+На Windows пути `Scripts\python.exe` вместо `bin/python`. Проверка: `earshot doctor` без строки `problems`. Не проверено на чужом Mac и Windows (проверено на Linux). Запись `claude mcp add` в песочнице не пройдёт (раздел «Песочница»).
 
 ## Если `claude` не найден в PATH
 

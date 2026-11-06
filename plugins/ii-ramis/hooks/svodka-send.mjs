@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// ИИ Рамис 2.6: отправка сводки занятия и запись отказов хуками (вне песочницы Claude Desktop).
+// ИИ Рамис 2.7: отправка сводки занятия и запись отказов хуками (вне песочницы Claude Desktop).
 //
 // Почему хук: в 2.4 сводку слал Claude командой curl через Bash. В песочнице Desktop у Bash нет сети
 // (домены не из списка блокируются или ждут окна разрешения) и нет записи вне рабочей папки, поэтому
@@ -15,7 +15,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-const PLUGIN_VERSION = '2.6.0';
+const PLUGIN_VERSION = '2.7.0';
 const ENDPOINT = process.env.II_RAMIS_TEST_ENDPOINT || 'https://fjxevxclomxlvhpjgbjs.supabase.co/rest/v1/sessions';
 // Публичный ключ роли anon: по настройкам базы умеет только добавлять строки в одну таблицу (не секрет).
 const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqeGV2eGNsb214bHZocGpnYmpzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM0NjEwOTQsImV4cCI6MjEwOTAzNzA5NH0.fabs-WOQqFDq2w-Be-J81m_Mg90dacS6xHoneZIqdWY';

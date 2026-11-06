@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ИИ Рамис 2.6: установка набора курса (урок 5) скриптом хука SessionStart.
+# ИИ Рамис 2.7: установка набора курса (урок 5) скриптом хука SessionStart.
 #
 # Зачем скрипт, а не команды Claude: в Claude Desktop команды Claude идут в песочнице,
 # и она запрещает писать в ~/.claude (там навыки и плагины) и в ~/.claude.json (MCP).
@@ -17,7 +17,7 @@
 case "$(uname -s 2>/dev/null)" in Darwin|Linux) ;; *) exit 0 ;; esac
 umask 077
 
-KIT_VERSION="2.6.0"
+KIT_VERSION="2.7.0"
 STATE_DIR="$HOME/.ii-ramis"
 STATE="$STATE_DIR/nabor.json"
 LOCK="$STATE_DIR/nabor.lock"
@@ -28,11 +28,15 @@ SELF="${BASH_SOURCE[0]}"
 SKILLS_CLI="skills@1.7.6"
 PLAYWRIGHT_MCP="@playwright/mcp@0.0.84"
 MCP_PREFIX="$HOME/.ii-ramis/mcp" # сюда ставится Playwright MCP, чтобы Claude запускал его по абсолютному пути, а не через npx из папки проекта
-HYPERFRAMES_SHA="1ff4cefd40c8dad98127fc78e8761c1ac62053dd" # тег v0.9.12 репозитория heygen-com/hyperframes
+HYPERFRAMES_SHA="b4cc674f7f312e77ded32e0b53006cc0bad6723b" # тег v0.9.19 репозитория heygen-com/hyperframes
 AR_URL="https://github.com/Panniantong/Agent-Reach/releases/download/v1.6.1/agent-reach.zip"
 AR_SHA256="51443d733bcb26064262442083a8f8abf6ba5e3e7df54beebafe98c88be04a60"
 REMOTION_SHA="c7cb2fdcacd134fb2ccb9b7a44f9ffa44e467271"
 GSAP_SHA="aed9cfd3277740755f6bfc1155c7aa645403b760" # greensock/gsap-skills (MIT), коммит от 06.11.2026
+FFMPEG_SKILL_SHA="9bdb444fdd569bcf50276337b36164fadf54b363" # kajisho5/ffmpeg-skill (MIT), тег v3.2.0
+TEARDOWN_SHA="a91262ac1109051e014662d42ecb0b7bc1f113b1" # elvarofficial/teardown (MIT), коммит от 31.10.2026
+ANATOMY_SHA="1482e8469b0a9e0d8cc18ea2740a01423d29ae80" # wheresryan22/anatomy (MIT), коммит от 18.10.2026
+GAMEDEV_SHA="19d93f97c9c1ea0f8b306e77aa81e0d3e352d3e9" # gamedev-skills/awesome-gamedev-agent-skills (Apache-2.0), коммит от 28.10.2026
 
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 export DISABLE_TELEMETRY=1 DO_NOT_TRACK=1 HYPERFRAMES_NO_TELEMETRY=1 HYPERFRAMES_NO_UPDATE_CHECK=1
@@ -87,7 +91,7 @@ emit() { # сообщение ученику, контекст для Claude (о
 # Быстрый синхронный хук: только сообщает, что набор ставится. Ничего не устанавливает.
 notice_mode() {
   need_install || return 0
-  emit "ИИ Рамис ставит инструменты урока 5 в фоне (2–5 минут, вводить ничего не нужно). Не хочешь: напиши «не ставь набор»." "ИИ Рамис: хук ставит набор 2.6.0 в фоне вне песочницы. Скажи ученику одной строкой, что ставится и как отказаться (отказ «не ставь набор» запишет хук сам, файлы не пиши: установка остановится на следующем шаге). Саму установку Bash-командами не запускай: Bash в песочнице не может писать в ~/.claude."
+  emit "ИИ Рамис ставит инструменты урока 5 и новые навыки в фоне (2–5 минут, вводить ничего не нужно). Не хочешь: напиши «не ставь набор»." "ИИ Рамис: хук ставит набор 2.7.0 в фоне вне песочницы. Скажи ученику одной строкой, что ставится и как отказаться (отказ «не ставь набор» запишет хук сам, файлы не пиши: установка остановится на следующем шаге). Саму установку Bash-командами не запускай: Bash в песочнице не может писать в ~/.claude."
 }
 
 # Асинхронный хук (async: true): сам ставит набор, по завершении сообщает Claude на следующем ходу.
@@ -102,8 +106,8 @@ auto_mode() {
   local status missing notes
   status="$(state_str status)"; missing="$(clean "$(state_str missing)")"; notes="$(clean "$(state_str notes)")"
   case "$status" in
-    ok)      emit "Набор урока 5 поставлен. Закрой сессию и открой заново (или напиши /reload-plugins), тогда всё подхватится." "ИИ Рамис: установка набора 2.6.0 завершена, status ok. Заметки (notes): ${notes:-нет}. Скажи ученику перезапустить сессию; про notes объясни по разделу 1 навыка nabor." ;;
-    partial) emit "Часть набора не поставилась: ${missing:-см. журнал}. Скажи об этом ИИ Рамису." "ИИ Рамис: установка набора 2.6.0 не дошла до конца (status partial). Не поставилось: ${missing:-неизвестно}. Заметки: ${notes:-нет}. Разбери по разделу 1 навыка nabor, журнал ~/.ii-ramis/nabor.log." ;;
+    ok)      emit "Набор урока 5 поставлен. Закрой сессию и открой заново (или напиши /reload-plugins), тогда всё подхватится." "ИИ Рамис: установка набора 2.7.0 завершена, status ok. Заметки (notes): ${notes:-нет}. Скажи ученику перезапустить сессию; про notes объясни по разделу 1 навыка nabor." ;;
+    partial) emit "Часть набора не поставилась: ${missing:-см. журнал}. Скажи об этом ИИ Рамису." "ИИ Рамис: установка набора 2.7.0 не дошла до конца (status partial). Не поставилось: ${missing:-неизвестно}. Заметки: ${notes:-нет}. Разбери по разделу 1 навыка nabor, журнал ~/.ii-ramis/nabor.log." ;;
   esac
 }
 
@@ -147,6 +151,7 @@ run_mode() {
 
   # --- предварительные условия: говорим честно, остальное не ломаем ---
   # Mac с Homebrew: Node и ffmpeg ставятся официальным brew (без вопросов, это домашка урока 5). Нет brew: честно пишем в notes.
+  ffmpeg_has_subs() { command -v ffmpeg >/dev/null 2>&1 && ffmpeg -hide_banner -filters 2>/dev/null | grep -qE ' (ass|subtitles) '; }
   node_fresh() { command -v node >/dev/null 2>&1 && node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=20)?0:1)' 2>/dev/null; }
   if [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1 && ! declined; then
     export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_ENV_HINTS=1
@@ -155,9 +160,15 @@ run_mode() {
       : >"$log"; brew install node >>"$log" 2>&1
       node_fresh && echo "поставил: node" || echo "node не поставился (см. журнал)"
     fi
-    if ! command -v ffmpeg >/dev/null 2>&1; then
-      : >"$log"; brew install ffmpeg >>"$log" 2>&1
-      command -v ffmpeg >/dev/null 2>&1 && echo "поставил: ffmpeg" || echo "ffmpeg не поставился (см. журнал)"
+    # ffmpeg нужен С фильтром субтитров (libass): у Homebrew-формулы ffmpeg его бывает нет, и субтитры монтажа не рисуются.
+    # Тогда ставим полную сборку ffmpeg-full и делаем её основной (старую только отлинковываем, не удаляем).
+    if ! ffmpeg_has_subs; then
+      : >"$log"; brew install ffmpeg-full >>"$log" 2>&1
+      if ! ffmpeg_has_subs; then
+        brew unlink ffmpeg >>"$log" 2>&1
+        brew link --force ffmpeg-full >>"$log" 2>&1 || { brew unlink ffmpeg-full >>"$log" 2>&1; brew link ffmpeg >>"$log" 2>&1; }
+      fi
+      ffmpeg_has_subs && echo "поставил: ffmpeg со субтитрами (ffmpeg-full)" || echo "ffmpeg со субтитрами не поставился (см. журнал)"
     fi
   fi
   local node_ok=0 git_ok=0
@@ -165,6 +176,8 @@ run_mode() {
   command -v git >/dev/null 2>&1 && git_ok=1 || notes="$notes git"
   [ -n "$claude_bin" ] || notes="$notes claude"
   command -v ffmpeg >/dev/null 2>&1 || notes="$notes ffmpeg"
+  if command -v ffmpeg >/dev/null 2>&1 && ! ffmpeg_has_subs; then notes="$notes ffmpegsubs"; fi
+  command -v python3 >/dev/null 2>&1 || notes="$notes python"
 
   # --- навык из закреплённого коммита ---
   # Без символических ссылок в чужом репозитории: клон проверяется до установки (папка packages/ с исходным кодом инструментов не устанавливается и не проверяется).
@@ -178,12 +191,16 @@ run_mode() {
     git -c protocol.file.allow=never clone -q --no-recurse-submodules "https://github.com/$repo.git" "$dir" >>"$log" 2>&1 && git -C "$dir" checkout -q "$sha" >>"$log" 2>&1 || { fail "$marker" "не скачалось"; return; }
     # В корне репозиториев авторов бывают CLAUDE.md и GEMINI.md как ссылки на AGENTS.md (так у greensock/gsap-skills): они безвредны, установщик их не копирует.
     if [ -n "$(find "$dir" -type l -not -path '*/.git/*' -not -path "$dir/packages/*" -not \( -path "$dir/CLAUDE.md" -o -path "$dir/GEMINI.md" \) 2>/dev/null | head -1)" ] || { [ -L "$dir/CLAUDE.md" ] && [ "$(readlink "$dir/CLAUDE.md")" != "AGENTS.md" ]; } || { [ -L "$dir/GEMINI.md" ] && [ "$(readlink "$dir/GEMINI.md")" != "AGENTS.md" ]; }; then echo "в репозитории $repo есть символические ссылки, не ставлю" >>"$log"; fail "$marker" "символические ссылки"; return; fi
+    # Anatomy: скрипт публикации в чужую галерею (git push) ученикам не нужен, не ставим его
+    [ "$marker" = "anatomy" ] && rm -f "$dir/scripts/publish.mjs" "$dir/scripts/publish.test.mjs"
     npx --yes "$SKILLS_CLI" add "$dir" --skill "${skill_args[@]}" -g -a claude-code -y --copy >>"$log" 2>&1
     if has_skill "$marker"; then done_ "$marker"; else fail "$marker" "нужны git и Node 22.20 или новее"; fi
   }
 
   skill_pinned vercel-labs/skills 7a5e920bead4b1039a6d6df5d7e1163b7b09423a find-skills find-skills
   skill_pinned emilkowalski/skills f1090bec277140d02ed202440185ad9d02ac1490 emil-design-eng emil-design-eng
+  # Плавность и тайминги анимации (монтаж «Про», веб): из того же репозитория Эмила на том же коммите
+  skill_pinned emilkowalski/skills f1090bec277140d02ed202440185ad9d02ac1490 "apple-design animate animation-vocabulary find-animation-opportunities improve-animations" apple-design
   skill_pinned pbakaus/impeccable 9fadc41729c38fd47d7ae622b501558653f9d2e9 impeccable impeccable
   skill_pinned blader/humanizer 0ef9fe5bc3572734fd3ae6c448fe00a30cd5dcf0 humanizer humanizer
   # Remotion: все навыки репозитория (remotion-best-practices маршрутизирует по остальным)
@@ -192,7 +209,28 @@ run_mode() {
   # GSAP: официальные навыки GreenSock (домашка урока 5), только gsap-*, на закреплённом коммите
   skill_pinned greensock/gsap-skills "$GSAP_SHA" "gsap-core gsap-frameworks gsap-performance gsap-plugins gsap-react gsap-scrolltrigger gsap-timeline gsap-utils" gsap-core
 
-  # --- HyperFrames: основной набор навыков HeyGen из клона на закреплённом коммите (тег v0.9.12), без их установщика ---
+  # --- Новое в 2.7: Teardown (3D-симуляторы), Anatomy (интерактивные схемы), веб-движки для игр, ffmpeg-skill (видеоредактор) ---
+  # Teardown и Anatomy при первом использовании сами просят `npm ci` в своей папке (с «да» ученика), здесь ничего не запускается.
+  skill_pinned elvarofficial/teardown "$TEARDOWN_SHA" teardown teardown
+  skill_pinned wheresryan22/anatomy "$ANATOMY_SHA" anatomy anatomy
+  skill_pinned gamedev-skills/awesome-gamedev-agent-skills "$GAMEDEV_SHA" "router phaser-core phaser-arcade-physics pixijs-rendering threejs-scene-setup threejs-gltf-loading threejs-materials-lighting" phaser-core
+
+  # ffmpeg-skill: свой установщик автора только копирует файлы в ~/.claude/skills/ffmpeg-skill (без сети и без postinstall), запускаем его из клона на закреплённом коммите
+  if has_skill ffmpeg-skill; then ok ffmpeg-skill
+  elif declined; then echo "отказ ученика: пропускаю ffmpeg-skill"
+  else
+    : >"$log"; fdir="$work/ffmpeg-skill"
+    if [ "$node_ok" -ne 1 ] || [ "$git_ok" -ne 1 ]; then fail ffmpeg-skill "нужны git и Node 22.20 или новее"
+    elif git -c protocol.file.allow=never clone -q --no-recurse-submodules "https://github.com/kajisho5/ffmpeg-skill.git" "$fdir" >>"$log" 2>&1 && git -C "$fdir" checkout -q "$FFMPEG_SKILL_SHA" >>"$log" 2>&1; then
+      if [ -n "$(find "$fdir" -type l -not -path '*/.git/*' 2>/dev/null | head -1)" ]; then fail ffmpeg-skill "символические ссылки"
+      else
+        node "$fdir/bin/install.js" --claude >>"$log" 2>&1
+        if has_skill ffmpeg-skill; then done_ ffmpeg-skill; else fail ffmpeg-skill "node bin/install.js"; fi
+      fi
+    else fail ffmpeg-skill "не скачалось"; fi
+  fi
+
+  # --- HyperFrames: основной набор навыков HeyGen из клона на закреплённом коммите (тег v0.9.19), без их установщика ---
   skill_pinned heygen-com/hyperframes "$HYPERFRAMES_SHA" "hyperframes hyperframes-cli hyperframes-registry media-use" hyperframes
 
   # --- superpowers (плагин из маркетплейса Anthropic) ---
