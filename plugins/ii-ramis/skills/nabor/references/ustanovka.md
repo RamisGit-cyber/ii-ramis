@@ -150,11 +150,19 @@ function Ok($n) { "уже стоит: $n" }
 function Done($n) { "поставил: $n" }
 function Fail($n, $why) { "НЕ ПОСТАВИЛОСЬ: $n ($why)"; $script:Fails++ }
 
+# Клон строго на закреплённом коммите: не вышло скачать или переключиться, или HEAD не равен коммиту, значит не ставим
+function Git-Pinned($url, $sha, $dir) {
+  git clone -q --no-recurse-submodules -c protocol.file.allow=never $url $dir *> $null
+  if ($LASTEXITCODE -ne 0) { return $false }
+  git -C $dir checkout -q $sha *> $null
+  if ($LASTEXITCODE -ne 0) { return $false }
+  return ((git -C $dir rev-parse HEAD) -eq $sha)
+}
+
 function Skill-Pinned($repo, $sha, $name) {
   if (Has-Skill $name) { Ok $name; return }
   $dir = Join-Path $Work $name
-  git clone -q "https://github.com/$repo.git" $dir *> $null
-  git -C $dir checkout -q $sha *> $null
+  if (-not (Git-Pinned "https://github.com/$repo.git" $sha $dir)) { Fail $name 'не скачалось на закреплённом коммите'; return }
   npx.cmd --yes $SkillsCli add $dir --skill $name -g -a claude-code -y --copy *> $null
   if (Has-Skill $name) { Done $name } else { Fail $name 'нужны git и Node 22.20 или новее' }
 }
@@ -173,9 +181,7 @@ Skill-Pinned 'blader/humanizer' '0ef9fe5bc3572734fd3ae6c448fe00a30cd5dcf0' 'huma
 if (Has-Skill 'remotion-best-practices') { Ok 'remotion' }
 else {
   $rdir = Join-Path $Work 'remotion'
-  git clone -q 'https://github.com/remotion-dev/skills.git' $rdir *> $null
-  git -C $rdir checkout -q 'c7cb2fdcacd134fb2ccb9b7a44f9ffa44e467271' *> $null
-  npx.cmd --yes $SkillsCli add $rdir --skill '*' -g -a claude-code -y --copy *> $null
+  if (Git-Pinned 'https://github.com/remotion-dev/skills.git' 'c7cb2fdcacd134fb2ccb9b7a44f9ffa44e467271' $rdir) { npx.cmd --yes $SkillsCli add $rdir --skill '*' -g -a claude-code -y --copy *> $null }
   if (Has-Skill 'remotion-best-practices') { Done 'remotion' } else { Fail 'remotion' 'нужны git и Node 22.20 или новее' }
 }
 
@@ -183,9 +189,8 @@ else {
 if (Has-Skill 'gsap-core') { Ok 'gsap' }
 else {
   $gdir = Join-Path $Work 'gsap'
-  git clone -q 'https://github.com/greensock/gsap-skills.git' $gdir *> $null
-  git -C $gdir checkout -q 'aed9cfd3277740755f6bfc1155c7aa645403b760' *> $null
-  $links = @(Get-ChildItem -LiteralPath $gdir -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and $_.FullName -notmatch '[\\/]\.git[\\/]' -and $_.Name -notin @('CLAUDE.md','GEMINI.md') })
+  if (-not (Git-Pinned 'https://github.com/greensock/gsap-skills.git' 'aed9cfd3277740755f6bfc1155c7aa645403b760' $gdir)) { Fail 'gsap' 'не скачалось на закреплённом коммите'; $gdir = $null }
+  $links = @(); if ($gdir) { $links = @(Get-ChildItem -LiteralPath $gdir -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and $_.FullName -notmatch '[\\/]\.git[\\/]' -and $_.Name -notin @('CLAUDE.md','GEMINI.md') }) }
   if ($links.Count -gt 0) { Fail 'gsap' 'в репозитории есть символические ссылки'; $gdir = $null }
   if ($gdir) { npx.cmd --yes $SkillsCli add $gdir --skill gsap-core gsap-frameworks gsap-performance gsap-plugins gsap-react gsap-scrolltrigger gsap-timeline gsap-utils -g -a claude-code -y --copy *> $null
     if (Has-Skill 'gsap-core') { Done 'gsap' } else { Fail 'gsap' 'нужны git и Node 22.20 или новее' } }
@@ -195,9 +200,7 @@ else {
 if ((Has-Skill 'hyperframes') -and (Has-Skill 'hyperframes-cli')) { Ok 'hyperframes' }
 else {
   $hdir = Join-Path $Work 'hyperframes'
-  git clone -q 'https://github.com/heygen-com/hyperframes.git' $hdir *> $null
-  git -C $hdir checkout -q 'b4cc674f7f312e77ded32e0b53006cc0bad6723b' *> $null
-  npx.cmd --yes $SkillsCli add $hdir --skill hyperframes hyperframes-cli hyperframes-registry media-use -g -a claude-code -y --copy *> $null
+  if (Git-Pinned 'https://github.com/heygen-com/hyperframes.git' 'b4cc674f7f312e77ded32e0b53006cc0bad6723b' $hdir) { npx.cmd --yes $SkillsCli add $hdir --skill hyperframes hyperframes-cli hyperframes-registry media-use -g -a claude-code -y --copy *> $null }
   if ((Has-Skill 'hyperframes') -and (Has-Skill 'hyperframes-cli')) { Done 'hyperframes' } else { Fail 'hyperframes' 'нужен Node 22 или новее' }
 }
 # Новое в 2.7: Teardown, Anatomy, веб-движки игр (на закреплённых коммитах), ffmpeg-skill (установщик автора из клона)
@@ -207,6 +210,7 @@ function Clone-Pinned($repo, $sha, $dirName) {
   if ($LASTEXITCODE -ne 0) { return $null }
   git -C $d checkout -q $sha *> $null
   if ($LASTEXITCODE -ne 0) { return $null }
+  if ((git -C $d rev-parse HEAD) -ne $sha) { return $null }
   $l = @(Get-ChildItem -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and $_.FullName -notmatch '[\\/]\.git[\\/]' })
   if ($l.Count -gt 0) { return $null }
   return $d
@@ -279,8 +283,8 @@ Earshot (github.com/Leonxlnx/earshot, MIT, v0.4.0 = коммит `591fa3e`) да
 ```bash
 # Mac или Linux; нужен uv. Одно окружение в своей папке, без прав администратора
 uv venv ~/.ii-ramis/earshot --python 3.12
-uv pip install --python ~/.ii-ramis/earshot/bin/python torch --index-url https://download.pytorch.org/whl/cpu
-uv pip install --python ~/.ii-ramis/earshot/bin/python "git+https://github.com/Leonxlnx/earshot@591fa3e028032e6dce56620a20e932e35667e8d8" "mcp>=2,<3"
+uv pip install --python ~/.ii-ramis/earshot/bin/python "torch==2.14.1" --index-url https://download.pytorch.org/whl/cpu
+uv pip install --python ~/.ii-ramis/earshot/bin/python "git+https://github.com/Leonxlnx/earshot@591fa3e028032e6dce56620a20e932e35667e8d8" "mcp==2.3.0"
 ~/.ii-ramis/earshot/bin/earshot doctor --fetch
 claude mcp add --scope user earshot -- ~/.ii-ramis/earshot/bin/python -m earshot mcp
 ```

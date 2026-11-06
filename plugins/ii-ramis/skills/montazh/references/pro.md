@@ -74,11 +74,18 @@
 - Палитра берётся от ученика (`бренд/`) или от кадра, а не «лайм/фиолетовый по умолчанию»; один стиль, не шкурка на всех роликах.
 - Не переборщи с анимацией: если вставка живёт 1,5 секунды, вход 0,2 с, а не 0,8.
 
-## 6. Рецепт сборки (проверен на сервере)
+## 6. Рецепт сборки (проверено на тестовой машине)
 
-Проверено на сервере: сцена 11 с, 1080×1920, 30 к/с, рендер около 1,5 минуты на один поток, лицо и рот не закрыты, все проверки HyperFrames чистые. Всё идёт внутри `_монтаж/<имя>/pro/`.
+Проверено на тестовой машине (Linux): сцена 11 с, 1080×1920, 30 к/с, рендер около 1,5 минуты на один поток, лицо и рот не закрыты, все проверки HyperFrames чистые. Всё идёт внутри `_монтаж/<имя>/pro/`.
 
 **Читай по порядку:** `hyperframes` (контракт композиции, `references/format.md`, `captions.md`, `overlays.md`, `motion.md`, `types/vertical.md`), `hyperframes-cli` (команды), `emil-design-eng` и `apple-design` (пружины, ease-out), затем `references/stili.md` этого навыка. Версия CLI закреплена на `0.9.19` (как навыки набора), всегда с `HYPERFRAMES_NO_TELEMETRY=1` и `HYPERFRAMES_NO_UPDATE_CHECK=1`.
+
+**Перед командами в этом окне (npx берёт пакет только с официального реестра, без чужих `.npmrc`, без статистики):**
+```
+Mac:     export NPM_CONFIG_REGISTRY=https://registry.npmjs.org/ NPM_CONFIG_USERCONFIG=/dev/null HYPERFRAMES_NO_TELEMETRY=1 HYPERFRAMES_NO_UPDATE_CHECK=1
+Windows: $env:NPM_CONFIG_REGISTRY='https://registry.npmjs.org/'; $env:NPM_CONFIG_USERCONFIG='NUL'; $env:HYPERFRAMES_NO_TELEMETRY='1'; $env:HYPERFRAMES_NO_UPDATE_CHECK='1'
+```
+Запускай из папки `_монтаж/<имя>/pro/` или рядом, не из корня чужих проектов.
 
 **Команды (запускай по одной):**
 ```

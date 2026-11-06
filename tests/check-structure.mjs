@@ -145,7 +145,7 @@ check(install.includes('skills@1.7.6') && install.includes('DO_NOT_TRACK=1'), 'u
 check(/\$env:DO_NOT_TRACK = '1'/.test(install), 'ustanovka.md: в блоке Windows нет отключения статистики');
 check(install.includes('releases/download/v1.6.1/agent-reach.zip') && /\$ArSha256 = '[0-9a-f]{64}'/.test(install), 'ustanovka.md: Agent Reach для Windows: закреплённый релиз и SHA-256');
 const pinnedWin = [...install.matchAll(/Skill-Pinned '[^']+' '([0-9a-f]{40})'/gi)].length;
-check(pinnedWin === 9 && /checkout -q 'c7cb2fdcacd134fb2ccb9b7a44f9ffa44e467271'/.test(install), `ustanovka.md: навыки Windows должны ставиться из закреплённых коммитов (${pinnedWin} из 9 плюс Remotion)`);
+check(pinnedWin === 9 && /Git-Pinned 'https:\/\/github\.com\/remotion-dev\/skills\.git' 'c7cb2fdcacd134fb2ccb9b7a44f9ffa44e467271'/.test(install) && /rev-parse HEAD\) -eq \$sha/.test(install), `ustanovka.md: навыки Windows должны ставиться из закреплённых коммитов (${pinnedWin} из 9 плюс Remotion)`);
 check(!/mcp add[^\n]*npx/.test(install), 'ustanovka.md: MCP подключается не через npx');
 check(/c7cb2fdcacd134fb2ccb9b7a44f9ffa44e467271/.test(kit), 'Remotion: коммит в скрипте и в блоке Windows должен совпадать');
 const installBlocks = [...install.matchAll(/```(?:bash|powershell) install-(?:mac|win)\n([\s\S]*?)```/g)].map((m) => m[1]).join('\n');
