@@ -13,7 +13,10 @@ import re
 import shutil
 import sys
 
-from common import H, SAFE, W, ffmpeg_ok, ffmpeg_text, inside, load_json, need, probe, project_path
+import math
+
+import layouts
+from common import H, SAFE, W, ffmpeg_ok, ffmpeg_text, inside, load_json, media_file, need, number, own_output, probe
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FONTS_SRC = os.path.join(os.path.dirname(HERE), "fonts")
@@ -76,11 +79,11 @@ def map_interval(start, end, segments):
     return cut_start, cut_end
 
 
-def build_ass(cards, style):
-    size = int(style.get("size", 84))
+def build_ass(cards, style, windows, face):
+    size = int(number(style.get("size", 84), 30, 200, "style.size"))
     accent_size = int(size * 1.3)
     single = style.get("layout", "stack") == "single"  # "single": одна строка, акцентное слово цветом
-    bottom = int(style.get("bottom", 1380))
+    bottom = int(number(style.get("bottom", 1380), 400, 1900, "style.bottom"))
     bottom = min(bottom, SAFE["bottom"] - 40)
     margin_v = H - bottom
     margin_l, margin_r = SAFE["left"] + 10, W - SAFE["right"] + 10
@@ -99,6 +102,13 @@ def build_ass(cards, style):
         f"{border_style},{outline},4,2,{margin_l},{margin_r},{margin_v},1\n\n"
         "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
+    if style.get("preset") == "afisha":
+        extra = "".join(
+            f"Style: {name},{font},60,&H00FFFFFF,&H00FFFFFF,&H90000000,&H90000000,0,0,0,0,100,100,0,0,1,0,4,2,0,0,0,1\n"
+            for name, font, _ in layouts.AFISHA_STYLES
+        )
+        head = head.replace("\n[Events]", extra + "\n[Events]", 1)
+        return head + "\n".join(layouts.afisha_lines(cards, style, face, ass_time, hex_to_ass, clean_text)) + "\n"
     lines = []
     for card in cards:
         text = clean_text(card["text"])
@@ -113,9 +123,10 @@ def build_ass(cards, style):
             body += f"{{\\fnOnest ExtraBold\\fs{accent_size}\\1c{accent}}}{accent_word}"
         else:
             body = f"{{\\blur2}}{text}"
-        lines.append(
-            f"Dialogue: 0,{ass_time(card['s'])},{ass_time(card['e'])},Card,,0,0,0,,{{\\fad(80,80)}}{body}"
-        )
+        pieces = layouts.card_pieces(windows, card, bottom) if windows else [(card["s"], card["e"], None)]
+        for start, end, piece_bottom in pieces:  # в сплите субтитр стоит на шве, вне сплита — на обычном месте
+            place = f"\\an2\\pos({W // 2},{piece_bottom})" if piece_bottom is not None else ""
+            lines.append(f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Card,,0,0,0,,{{{place}\\fad(80,80)}}{body}")
     return head + "\n".join(lines) + "\n"
 
 
@@ -124,7 +135,8 @@ def make_cards(plan, segments):
     for card in plan.get("cards", []):
         interval = map_interval(float(card["s"]), float(card["e"]), segments)
         if interval:
-            mapped.append({"s": interval[0], "e": interval[1], "text": card["text"], "accent": card.get("accent", "")})
+            fields = {key: card.get(key, "") for key in ("text", "accent", "theme", "main", "over", "hand")}
+            mapped.append({"s": interval[0], "e": interval[1], **fields})
     mapped.sort(key=lambda c: c["s"])
     for current, following in zip(mapped, mapped[1:]):  # одна строка за раз, без «призраков»
         current["e"] = min(current["e"], following["s"] - 0.02)
@@ -138,11 +150,11 @@ def mean_volume(path, seconds=60):
 
 
 def build_base(project, plan, workdir, segments):
-    source = project_path(project, plan["source"])
+    source = media_file(project, plan["source"])
     info = probe(source)
     if not any(s["codec_type"] == "audio" for s in info["streams"]):
         sys.exit("В исходном видео нет звука, говорящую голову без речи не смонтировать.")
-    crop_x = min(1.0, max(0.0, float(plan.get("crop_x", 0.5))))
+    crop_x = number(plan.get("crop_x", 0.5), 0.0, 1.0, "crop_x")
     fit = (
         f"fps=30,scale={W}:{H}:force_original_aspect_ratio=increase,"
         f"crop={W}:{H}:(iw-{W})*{crop_x}:(ih-{H})*0.5,setsar=1,format=yuv420p"
@@ -158,10 +170,10 @@ def build_base(project, plan, workdir, segments):
         )
         labels += f"[v{index}][a{index}]"
     frame = plan.get("frame") or {}
-    zoom = min(1.0, max(0.7, float(frame.get("scale", 1.0))))
+    zoom = number(frame.get("scale", 1.0), 0.7, 1.0, "frame.scale")
     if zoom < 1.0:  # «отъезд»: человек меньше и выше, снизу освобождается место под субтитры; фон — размытая копия того же кадра
         small_w = int(W * zoom) // 2 * 2
-        top = int(frame.get("top", 40))
+        top = int(number(frame.get("top", 40), 0, 400, "frame.top"))
         parts.append(f"{labels}concat=n={len(segments)}:v=1:a=1[vc][ac]")
         parts.append(
             "[vc]split=2[fa][fb];[fb]boxblur=30:3[bg];"
@@ -172,7 +184,7 @@ def build_base(project, plan, workdir, segments):
     base = os.path.join(workdir, "base.mp4")
     ffmpeg_ok([
         *inputs, "-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[ac]",
-        "-c:v", "libx264", "-crf", "16", "-preset", "fast", "-c:a", "aac", "-b:a", "192k", base,
+        "-map_metadata", "-1", "-c:v", "libx264", "-crf", "16", "-preset", "fast", "-c:a", "aac", "-b:a", "192k", base,
     ])
     return base
 
@@ -181,30 +193,37 @@ def mix_audio(project, plan, workdir, base):
     music = plan.get("music")
     mix = os.path.join(workdir, "mix.wav")
     if not music or not music.get("file"):
-        ffmpeg_ok(["-i", base, "-vn", "-ac", "2", "-ar", "48000", mix])
+        ffmpeg_ok(["-i", base, "-vn", "-map_metadata", "-1", "-ac", "2", "-ar", "48000", mix])
         return mix
-    music_file = project_path(project, music["file"])
+    music_file = media_file(project, music["file"])
     duration = float(probe(base)["format"]["duration"])
+    music_seconds = float(probe(music_file)["format"].get("duration") or 1)
     voice_level, music_level = mean_volume(base), mean_volume(music_file)
-    below = float(music.get("below_voice_db", 18))
+    below = number(music.get("below_voice_db", 18), 6, 40, "music.below_voice_db")
     gain = (voice_level - below - music_level) if None not in (voice_level, music_level) else -22.0
     fade_out = max(0.0, duration - 1.5)
     graph = (
-        f"[1:a]aloop=loop=-1:size=2000000000,atrim=0:{duration:.2f},asetpts=PTS-STARTPTS,volume={gain:.1f}dB,"
+        f"[1:a]aloop=loop=-1:size={int(music_seconds * 48000) + 1},atrim=0:{duration:.2f},asetpts=PTS-STARTPTS,volume={gain:.1f}dB,"
         f"afade=t=in:d=1,afade=t=out:st={fade_out:.2f}:d=1.5[m];"
         "[0:a]asplit=2[v1][v2];[m][v2]sidechaincompress=threshold=0.04:ratio=6:attack=20:release=500[md];"
         "[v1][md]amix=inputs=2:duration=first:normalize=0[out]"
     )
-    ffmpeg_ok(["-i", base, "-i", music_file, "-filter_complex", graph, "-map", "[out]", "-ac", "2", "-ar", "48000", mix])
+    ffmpeg_ok(["-i", base, "-i", music_file, "-filter_complex", graph, "-map", "[out]", "-map_metadata", "-1", "-ac", "2", "-ar", "48000", mix])
     return mix
 
 
 def measure_loudness(mix):
     report = ffmpeg_text(["-i", mix, "-af", "loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json", "-f", "null", os.devnull])
-    block = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", report, re.S)
-    if not block:
+    blocks = re.findall(r"\{[^{}]*\"input_i\"[^{}]*\}", report, re.S)
+    if not blocks:
         return None
-    return json.loads(block.group(0))
+    try:  # значения идут в фильтр ffmpeg, поэтому только числа, а не строки из отчёта
+        raw = json.loads(blocks[-1])
+        keys = ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset")
+        values = {key: float(raw[key]) for key in keys}
+    except (ValueError, KeyError):
+        return None
+    return values if all(math.isfinite(v) for v in values.values()) else None
 
 
 def loudnorm_filter(measured):
@@ -212,25 +231,29 @@ def loudnorm_filter(measured):
         return "loudnorm=I=-14:TP=-1.5:LRA=11"
     return (
         "loudnorm=I=-14:TP=-1.5:LRA=11:"
-        f"measured_I={measured['input_i']}:measured_TP={measured['input_tp']}:"
-        f"measured_LRA={measured['input_lra']}:measured_thresh={measured['input_thresh']}:"
-        f"offset={measured['target_offset']}:linear=true"
+        f"measured_I={measured['input_i']:.2f}:measured_TP={measured['input_tp']:.2f}:"
+        f"measured_LRA={measured['input_lra']:.2f}:measured_thresh={measured['input_thresh']:.2f}:"
+        f"offset={measured['target_offset']:.2f}:linear=true"
     )
 
 
 INSERT_PRESETS = {"top": ("(W-w)/2", str(SAFE["top"] + 20)), "bottom": ("(W-w)/2", str(SAFE["bottom"] - 460))}
 
 
-def inserts_chain(project, plan, segments):
-    inputs, graph, last = [], [], "vs"
+def inserts_chain(project, plan, segments, last, first_slot):
+    inputs, graph = [], []
     for index, item in enumerate(plan.get("inserts", [])):
         interval = map_interval(float(item["s"]), float(item["e"]), segments)
         if not interval:
             continue
-        path = project_path(project, item["file"])
-        width = int(item.get("width", 480))
-        x, y = INSERT_PRESETS.get(item.get("pos", "top"), (str(int(item.get("x", 90))), str(int(item.get("y", 240)))))
-        slot = len(inputs) // 8 + 1
+        path = media_file(project, item["file"])
+        width = int(number(item.get("width", 480), 50, W, "inserts.width"))
+        if item.get("pos") in INSERT_PRESETS:
+            x, y = INSERT_PRESETS[item["pos"]]
+        else:
+            x = str(int(number(item.get("x", 90), 0, W, "inserts.x")))
+            y = str(int(number(item.get("y", 240), 0, H, "inserts.y")))
+        slot = first_slot + len(inputs) // 8
         inputs += ["-loop", "1", "-framerate", "30", "-t", f"{interval[1] + 1:.2f}", "-i", path]
         graph.append(f"[{slot}:v]scale={width}:-2,format=rgba[ins{index}]")
         out = f"o{index}"
@@ -249,7 +272,9 @@ def build(project, plan_path):
     if not inside(project, workdir):
         sys.exit("Рабочая папка вне проекта.")
     os.makedirs(workdir, exist_ok=True)
-    source = project_path(project, plan["source"])
+    for name in ("base.mp4", "mix.wav", "final.mp4", "subs.ass", "fonts", "cut-plan.json"):
+        own_output(project, os.path.join(workdir, name))  # не пишем по ссылкам, ведущим за пределы проекта
+    source = media_file(project, plan["source"])
     duration = float(probe(source)["format"]["duration"])
     transcript_path = os.path.join(workdir, "transcript.json")
     words = load_json(transcript_path)["words"] if os.path.isfile(transcript_path) else []
@@ -257,25 +282,34 @@ def build(project, plan_path):
     print("Куски (сек в исходнике):", [[round(a, 2), round(b, 2)] for a, b in segments])
     base = build_base(project, plan, workdir, segments)
     cards = make_cards(plan, segments)
+    windows = layouts.plan_splits(project, plan, map_interval, segments)
     with open(os.path.join(workdir, "subs.ass"), "w", encoding="utf-8") as handle:
-        handle.write(build_ass(cards, plan.get("style", {})))
+        handle.write(build_ass(cards, plan.get("style", {}), windows, plan.get("face")))
     fonts_dir = os.path.join(workdir, "fonts")
     shutil.copytree(FONTS_SRC, fonts_dir, dirs_exist_ok=True)
     mix = mix_audio(project, plan, workdir, base)
     loudness = loudnorm_filter(measure_loudness(mix))
-    extra_inputs, graph, last = inserts_chain(project, plan, segments)
-    video_graph = ["[0:v]null[vs]"] + graph + [f"[{last}]ass=filename=subs.ass:fontsdir=fonts[vout]"]
-    audio_slot = len(extra_inputs) // 8 + 1  # на каждую вставку приходится 8 аргументов
+    split_inputs, split_graph, last = layouts.split_graph(windows, "vs", 1)
+    insert_inputs, graph, last = inserts_chain(project, plan, segments, last, split_inputs.count("-i") + 1)
+    extra_inputs = split_inputs + insert_inputs
+    video_graph = ["[0:v]null[vs]"] + split_graph + graph + [f"[{last}]ass=filename=subs.ass:fontsdir=fonts[vout]"]
+    audio_slot = extra_inputs.count("-i") + 1
     final = os.path.join(workdir, "final.mp4")
     ffmpeg_ok(
         ["-i", "base.mp4", *extra_inputs, "-i", "mix.wav", "-filter_complex", ";".join(video_graph),
-         "-map", "[vout]", "-map", f"{audio_slot}:a", "-af", loudness, "-c:v", "libx264", "-crf", "18",
+         "-map", "[vout]", "-map", f"{audio_slot}:a", "-map_metadata", "-1", "-af", loudness, "-c:v", "libx264", "-crf", "18",
          "-preset", "medium", "-pix_fmt", "yuv420p", "-r", "30", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
          "-movflags", "+faststart", "-shortest", "final.mp4"],
         cwd=workdir,
     )
     with open(os.path.join(workdir, "cut-plan.json"), "w", encoding="utf-8") as handle:
-        json.dump({"segments": segments, "cards": cards}, handle, ensure_ascii=False, indent=1)
+        json.dump({"segments": segments, "cards": cards, "splits": [
+            {"a": w["a"], "b": w["b"], "seam": w["seam"], "y0": w["y0"]} for w in windows],
+            "preset": plan.get("style", {}).get("preset", "classic"),
+            "text_color": plan.get("style", {}).get(
+                "text", "#F3EBDD" if plan.get("style", {}).get("preset") == "afisha" else "#FFFFFF"),
+            "main_color": plan.get("style", {}).get("main", plan.get("style", {}).get("text", "#F3EBDD")),
+            "face_top": (plan.get("face") or {}).get("y")}, handle, ensure_ascii=False, indent=1)
     print(f"Готово к проверке: {final}")
 
 
@@ -285,12 +319,14 @@ def export(project, plan_path):
     final = os.path.join(project, "_монтаж", name, "final.mp4")
     if not os.path.isfile(final):
         sys.exit("Сначала собери ролик (build) и пройди проверку критика.")
-    out_dir = os.path.join(project, "готово")
+    own_output(project, final)
+    out_dir = own_output(project, os.path.join(project, "готово"))
     os.makedirs(out_dir, exist_ok=True)
     target, version = os.path.join(out_dir, f"{name}.mp4"), 1
     while os.path.exists(target):  # чужие и прошлые файлы не перезаписываем
         version += 1
         target = os.path.join(out_dir, f"{name}-v{version}.mp4")
+    own_output(project, target)
     shutil.copyfile(final, target)
     print(f"Ролик лежит здесь: {target}")
 

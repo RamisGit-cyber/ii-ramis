@@ -50,8 +50,8 @@ const reminder = readFileSync(join(plugin, 'hooks', 'reminder.txt'), 'utf8');
 check(reminder.includes('версия 2.6'), 'reminder.txt: версия должна совпадать с plugin.json');
 check(!existsSync(join(plugin, 'scripts')), 'папки scripts быть не должно');
 const code = listFiles(plugin).filter((file) => ['.mjs', '.js', '.sh', '.ps1', '.py'].includes(extname(file)));
-const montazhScripts = ['common.py', 'transcribe.py', 'montage.py', 'critic.py'].map((name) => join(plugin, 'skills', 'montazh', 'scripts', name));
-check(code.sort().join(',') === [join(plugin, 'hooks', 'kit-install.sh'), join(plugin, 'hooks', 'svodka-send.mjs'), ...montazhScripts].sort().join(','), `в плагине разрешены только два хука и четыре скрипта навыка montazh/scripts: ${code.join(', ')}`);
+const montazhScripts = ['common.py', 'transcribe.py', 'montage.py', 'critic.py', 'layouts.py'].map((name) => join(plugin, 'skills', 'montazh', 'scripts', name));
+check(code.sort().join(',') === [join(plugin, 'hooks', 'kit-install.sh'), join(plugin, 'hooks', 'svodka-send.mjs'), ...montazhScripts].sort().join(','), `в плагине разрешены только два хука и пять скриптов навыка montazh/scripts: ${code.join(', ')}`);
 
 // Хук сводки: безопасность
 const sv = readFileSync(join(plugin, 'hooks', 'svodka-send.mjs'), 'utf8');
@@ -74,7 +74,7 @@ check([...kit.matchAll(/^\s*skill_pinned [\w./-]+ ([0-9a-f]{40}|"\$REMOTION_SHA"
 check(/GSAP_SHA="[0-9a-f]{40}"/.test(kit) && /skill_pinned greensock\/gsap-skills "\$GSAP_SHA"/.test(kit), 'kit-install.sh: GSAP на закреплённом коммите');
 check(kit.includes('-type l') && kit.includes('символические ссылки'), 'kit-install.sh: клон чужого репозитория проверяется на символические ссылки');
 const kitBrew = [...kitCode.matchAll(/brew (install|upgrade) (\S+)/g)].map((m) => m[2]);
-check(kitBrew.every((name) => name === 'node' || name === 'ffmpeg') && kitBrew.length === 3, `kit-install.sh: brew только для node и ffmpeg (домашка урока 5), найдено: ${kitBrew.join(', ')}`);
+check(kitBrew.every((name) => name === 'node' || name === 'ffmpeg') && kitBrew.length === 2, `kit-install.sh: brew только для node и ffmpeg (домашка урока 5), найдено: ${kitBrew.join(', ')}`);
 check(!/winget install|apt(-get)? install|\bsudo\b|curl[^\n]*\|\s*(ba)?sh|\beval\b/.test(kitCode), 'kit-install.sh: никаких winget/apt/sudo/curl|sh/eval');
 check(!/plugin marketplace add (?!anthropics\/claude-plugins-official)/.test(kitCode), 'kit-install.sh: можно добавлять только маркетплейс Anthropic');
 check([...kitCode.matchAll(/rm -rf ("[^"]*"(?: "[^"]*")*)/g)].every((m) => /^("\$LOCK"|"\$WORK" "\$LOCK")$/.test(m[1])), 'kit-install.sh: удалять можно только свой замок и свою временную папку');
@@ -179,14 +179,14 @@ check(readFileSync(join(plugin, 'skills', 'ii-ramis', 'references', 'kurs-karta.
 
 // Навык montazh: рамки безопасности и обязательный критик
 const montazhDir = join(plugin, 'skills', 'montazh');
-const montazhRefs = ['references/rabota.md', 'references/kritik.md', 'references/referensy.md', 'references/ustanovka.md', 'fonts/Onest-Regular.ttf', 'fonts/Onest-ExtraBold.ttf', 'fonts/OFL.txt'];
+const montazhRefs = ['references/rabota.md', 'references/kritik.md', 'references/referensy.md', 'references/ustanovka.md', 'references/stili.md', 'fonts/Onest-Regular.ttf', 'fonts/Onest-Light.ttf', 'fonts/Onest-ExtraBold.ttf', 'fonts/Oswald-Bold.ttf', 'fonts/CormorantGaramond-SemiBoldItalic.ttf', 'fonts/OFL.txt'];
 for (const name of montazhRefs) check(existsSync(join(montazhDir, name)), `нет montazh/${name}`);
 const montazhSkill = readFileSync(join(montazhDir, 'SKILL.md'), 'utf8');
 check(/Критик \(обязательный/.test(montazhSkill) && montazhSkill.includes('references/kritik.md') && montazhSkill.includes('Ничего не публикуй'), 'montazh: нет обязательного критика или запрета публикации');
 check(!/\bheavy\b/.test(montazhSkill + readFileSync(join(montazhDir, 'references', 'rabota.md'), 'utf8')), 'montazh: слово heavy (у учеников его нет) упоминать нельзя');
 const montazhCode = montazhScripts.map((file) => (existsSync(file) ? readFileSync(file, 'utf8') : '')).join('\n');
 check(!/shutil\.rmtree|os\.remove|os\.unlink|\.unlink\(|rmdir|os\.system|shell=True|eval\(|exec\(|urllib|requests|socket|\.claude/.test(montazhCode), 'montazh/scripts: никаких удалений, shell=True, сети и обращений к ~/.claude (кроме faster-whisper в transcribe.py)'.replace('(кроме faster-whisper в transcribe.py)', ''));
-check(/def inside\(project, path\)/.test(montazhCode) && /commonpath/.test(montazhCode) && /project_path\(project, plan\["source"\]\)/.test(montazhCode), 'montazh/scripts: пути проверяются на выход за папку проекта');
+check(/def inside\(project, path\)/.test(montazhCode) && /commonpath/.test(montazhCode) && /media_file\(project, plan\["source"\]\)/.test(montazhCode), 'montazh/scripts: пути проверяются на выход за папку проекта');
 check(/faster-whisper==1\.2\.1/.test(montazhCode) && /revision=revision/.test(montazhCode) && /[0-9a-f]{40}/.test(montazhCode), 'montazh: расшифровка на закреплённой версии faster-whisper и модели');
 
 if (failures.length > 0) {

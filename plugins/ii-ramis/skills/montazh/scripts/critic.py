@@ -11,7 +11,7 @@ import re
 import subprocess
 import sys
 
-from common import H, SAFE, W, ffmpeg_ok, ffmpeg_text, inside, load_json, need, probe
+from common import H, SAFE, W, ffmpeg_ok, ffmpeg_text, guarded, inside, load_json, need, own_output, probe
 
 SAMPLE_FPS = 2
 SMALL_W, SMALL_H = 540, 960
@@ -31,7 +31,7 @@ def _table(level):
 
 def gray_frames(args, cwd=None):
     """Кадры 540x960 в серых тонах, SAMPLE_FPS в секунду: ffmpeg отдаёт их как PGM по трубе."""
-    process = subprocess.Popen(["ffmpeg", "-v", "error", *args, "-f", "image2pipe", "-vcodec", "pgm", "-"],
+    process = subprocess.Popen(["ffmpeg", "-v", "error", *guarded(args), "-f", "image2pipe", "-vcodec", "pgm", "-"],
                                stdout=subprocess.PIPE, cwd=cwd)
     header = f"P5\n{SMALL_W} {SMALL_H}\n255\n".encode()
     size = SMALL_W * SMALL_H
@@ -45,20 +45,23 @@ def gray_frames(args, cwd=None):
         sys.exit("ffmpeg не смог разобрать кадры для проверки (см. сообщение выше)")
 
 
-def bright_bbox(frame, level, min_count):
-    """Рамка ярких пикселей кадра в координатах 1080x1920 (считает встроенными быстрыми операциями)."""
+def bright_boxes(frame, level, min_count, gap=12):
+    """Рамки ярких пятен кадра (каждая отдельная строка или табличка отдельно) в координатах 1080x1920."""
     table = _table(level)
     ys = [y for y in range(SMALL_H) if frame[y * SMALL_W:(y + 1) * SMALL_W].translate(table).count(1) >= min_count]
-    xs = [x for x in range(SMALL_W) if frame[x::SMALL_W].translate(table).count(1) >= min_count]
-    if not ys or not xs:
-        return None
-    return [min(xs) * FACTOR, min(ys) * FACTOR, (max(xs) + 1) * FACTOR, (max(ys) + 1) * FACTOR]
-
-
-def union(first, second):
-    if not first or not second:
-        return first or second
-    return [min(first[0], second[0]), min(first[1], second[1]), max(first[2], second[2]), max(first[3], second[3])]
+    bands = []
+    for y in ys:
+        if bands and y - bands[-1][1] <= gap:
+            bands[-1][1] = y
+        else:
+            bands.append([y, y])
+    boxes = []
+    for top, bottom in bands:
+        band = frame[top * SMALL_W:(bottom + 1) * SMALL_W]
+        xs = [x for x in range(SMALL_W) if band[x::SMALL_W].translate(table).count(1) >= min_count]
+        if xs:
+            boxes.append([min(xs) * FACTOR, top * FACTOR, (max(xs) + 1) * FACTOR, (bottom + 1) * FACTOR])
+    return boxes
 
 
 def region_brightness(frame, box):
@@ -71,31 +74,62 @@ def region_brightness(frame, box):
     return total / count if count else 128
 
 
-def contrast_ratio(background_gray):
-    luminance = (background_gray / 255) ** 2.2
-    return 1.05 / (luminance + 0.05)  # белый текст на таком фоне
+def hex_luminance(color):
+    match = re.fullmatch(r"#?([0-9a-fA-F]{6})", color or "")
+    if not match:
+        return 1.0
+    value = int(match.group(1), 16)
+    gray = (0.3 * (value >> 16) + 0.59 * ((value >> 8) & 255) + 0.11 * (value & 255)) / 255
+    return gray ** 2.2
 
 
-def check_picture(workdir, face, has_inserts, backdrop, problems, notes):
+def contrast_ratio(background_gray, text_luminance=1.0):
+    background = (background_gray / 255) ** 2.2
+    high, low = max(background, text_luminance), min(background, text_luminance)
+    return (high + 0.05) / (low + 0.05)
+
+
+def panel_stats(frame, height):
+    """Верхняя панель сплита: средняя яркость и разброс (пустая или чёрная вставка читаться не будет)."""
+    total = total_sq = count = 0
+    for y in range(0, height // FACTOR, 3):
+        row = frame[y * SMALL_W:(y + 1) * SMALL_W:3]
+        total += sum(row)
+        total_sq += sum(v * v for v in row)
+        count += len(row)
+    mean = total / count if count else 0
+    return mean, max(0.0, total_sq / count - mean * mean) ** 0.5 if count else 0
+
+
+def check_picture(workdir, face, has_inserts, backdrop, layout, problems, notes):
     duration = float(probe(os.path.join(workdir, "final.mp4"))["format"]["duration"])
     fit = f"fps={SAMPLE_FPS},scale={SMALL_W}:{SMALL_H},format=gray"
     # 1) где стоят буквы: субтитры рисуются на чёрном фоне, поэтому видны на любом фоне видео
+    # Для маски все цвета букв заменяются белым: тёмный текст на чёрном фоне иначе не виден
+    ass_text = open(os.path.join(workdir, "subs.ass"), encoding="utf-8").read()
+    ass_text = re.sub(r"\\1c&H[0-9A-Fa-f]{6,8}&?", r"\\1c&HFFFFFF&", ass_text)
+    ass_text = re.sub(r"(Style: [^\n]*?),&H[0-9A-Fa-f]{8},&H[0-9A-Fa-f]{8},", r"\1,&H00FFFFFF,&H00FFFFFF,", ass_text)
+    mask_path = own_output(os.path.dirname(os.path.dirname(workdir)), os.path.join(workdir, "subs-mask.ass"))
+    with open(mask_path, "w", encoding="utf-8") as handle:
+        handle.write(ass_text)
     mask_args = ["-f", "lavfi", "-i", f"color=c=black:s={W}x{H}:r=30:d={duration:.2f}",
-                 "-vf", f"ass=filename=subs.ass:fontsdir=fonts,{fit}"]
-    text_boxes = [bright_bbox(f, TEXT_LEVEL, 1) for f in gray_frames(mask_args, workdir)]
+                 "-vf", f"ass=filename=subs-mask.ass:fontsdir=fonts,{fit}"]
+    text_boxes = [bright_boxes(f, TEXT_LEVEL, 1) for f in gray_frames(mask_args, workdir)]
     # 2) вставки-картинки: видны как разница между чистым кадром и итогом
-    insert_boxes = [None] * len(text_boxes)
+    insert_boxes = [[] for _ in text_boxes]
     if has_inserts:
         diff_args = ["-i", os.path.join(workdir, "final.mp4"), "-i", os.path.join(workdir, "base.mp4"),
                      "-filter_complex", f"[0:v][1:v]blend=all_mode=difference,{fit}"]
-        insert_boxes = [bright_bbox(f, INSERT_LEVEL, 6) for f in gray_frames(diff_args, workdir)]
+        insert_boxes = [bright_boxes(f, INSERT_LEVEL, 6, gap=40) for f in gray_frames(diff_args, workdir)]
     base_frames = list(gray_frames(["-i", os.path.join(workdir, "base.mp4"), "-vf", fit], workdir))
+    splits = layout.get("splits", [])
+    final_frames = list(gray_frames(["-i", os.path.join(workdir, "final.mp4"), "-vf", fit], workdir)) if splits else []
     samples = []
     for index, frame in enumerate(base_frames):
-        text_box = text_boxes[index] if index < len(text_boxes) else None
-        extra = insert_boxes[index] if index < len(insert_boxes) else None
-        samples.append((index / SAMPLE_FPS, union(text_box, extra), frame))
-    shown = [(t, box, frame) for t, box, frame in samples if box]
+        text_list = text_boxes[index] if index < len(text_boxes) else []
+        extra = insert_boxes[index] if index < len(insert_boxes) else []
+        samples.append((index / SAMPLE_FPS, text_list + extra, frame))
+    shown = [(t, box, frame) for t, boxes, frame in samples for box in boxes]
     first_text = shown[0][0] if shown else None
     if not shown:
         problems.append("ПРОВАЛ: в ролике не нашлось ни одной надписи (субтитры не видны)")
@@ -110,17 +144,44 @@ def check_picture(workdir, face, has_inserts, backdrop, problems, notes):
                     face["x"] + face["w"] + FACE_MARGIN, face["y"] + face["h"] + FACE_MARGIN]
     else:
         notes.append("ВНИМАНИЕ: в плане нет рамки лица (face), проверка «не закрывает лицо» только глазами по кадрам")
+    text_luminance = hex_luminance(layout.get("text_color", "#FFFFFF"))
+    afisha = layout.get("preset") == "afisha"
+
+    def face_at(moment):
+        if not face_box:
+            return None
+        for win in splits:
+            if min(abs(moment - win["a"]), abs(moment - win["b"])) < 0.2:
+                return None  # на самом стыке сплита кадры смешиваются на 1-2 кадра, лицо там не проверяем
+            if win["a"] <= moment <= win["b"]:
+                shift = win["seam"] - win["y0"]
+                return [face_box[0], face_box[1] + shift, face_box[2], face_box[3] + shift]
+        return face_box
+
+    for win in splits:  # лицо в нижней части сплита не должно быть обрезано
+        if face and (face["y"] - win["y0"] < 0 or face["y"] + face["h"] - win["y0"] > H - win["seam"]):
+            problems.append(f"ПРОВАЛ: в сплите ({win['a']:.1f}-{win['b']:.1f} с) лицо обрезано краем нижней части")
+    for index, (t, _, frame) in enumerate(samples):
+        win = next((w for w in splits if w["a"] <= t <= w["b"]), None)
+        if win and index < len(final_frames):
+            mean, spread = panel_stats(final_frames[index], win["seam"])
+            if mean < 10 or spread < 6:
+                worst.setdefault("вставка", []).append((t, [0, 0, W, win["seam"]]))
     for t, box, frame in shown:
         x0, y0, x1, y1 = box
+        face_box_now = face_at(t)
         if x0 < SAFE["left"] - TOLERANCE or x1 > SAFE["right"] + TOLERANCE:
             worst.setdefault("бока", []).append((t, box))
         if y0 < SAFE["top"] - TOLERANCE:
             worst.setdefault("верх", []).append((t, box))
         if y1 > SAFE["bottom"] + TOLERANCE:
             worst.setdefault("низ", []).append((t, box))
-        if face_box and not (x1 < face_box[0] or x0 > face_box[2] or y1 < face_box[1] or y0 > face_box[3]):
+        if face_box_now and not (x1 < face_box_now[0] or x0 > face_box_now[2] or y1 < face_box_now[1] or y0 > face_box_now[3]):
             worst.setdefault("лицо", []).append((t, box))
-        ratio = contrast_ratio(region_brightness(frame, box))
+        luminance = text_luminance
+        if afisha and layout.get("face_top") is not None and box[1] >= layout["face_top"]:
+            luminance = hex_luminance(layout.get("main_color", "#F3EBDD"))  # главное слово стоит ниже головы
+        ratio = contrast_ratio(region_brightness(frame, box), luminance)
         if ratio < 2.5 and not backdrop:
             worst.setdefault("контраст", []).append((t, box))
     names = {
@@ -128,10 +189,12 @@ def check_picture(workdir, face, has_inserts, backdrop, problems, notes):
         "верх": f"надпись залезает под шапку Instagram (выше y={SAFE['top']})",
         "низ": f"надпись залезает в подпись и кнопки Instagram (ниже y={SAFE['bottom']})",
         "лицо": "надпись или вставка закрывает лицо или рот",
-        "контраст": "белый текст плохо читается на светлом фоне (нужна тёмная подложка: style.backdrop)",
+        "контраст": "текст плохо читается на фоне (нужна тёмная подложка style.backdrop или другой цвет текста)",
+        "вставка": "верхняя панель сплита пустая или тёмная: вставка не читается",
     }
     for key, items in worst.items():
-        times = ", ".join(f"{t:.1f}" for t, _ in items[:6]) + (" ..." if len(items) > 6 else "")
+        moments = sorted({t for t, _ in items})
+        times = ", ".join(f"{t:.1f}" for t in moments[:6]) + (" ..." if len(moments) > 6 else "")
         t0, box = items[0]
         problems.append(f"ПРОВАЛ: {names[key]}; секунды: {times}; рамка надписи {box}")
     if shown and not worst:
@@ -164,10 +227,13 @@ def check_sound(final, duration, problems, notes):
     report = ffmpeg_text(["-i", final, "-vn", "-af", "volumedetect,silencedetect=n=-40dB:d=0.6,"
                           "loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json", "-f", "null", os.devnull])
     peak = re.search(r"max_volume: (-?[\d.]+) dB", report)
-    block = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", report, re.S)
-    if block:
-        measured = json.loads(block.group(0))
-        loud, true_peak = float(measured["input_i"]), float(measured["input_tp"])
+    blocks = re.findall(r"\{[^{}]*\"input_i\"[^{}]*\}", report, re.S)
+    try:
+        measured = json.loads(blocks[-1]) if blocks else None
+        loud, true_peak = (float(measured["input_i"]), float(measured["input_tp"])) if measured else (None, None)
+    except (ValueError, KeyError):
+        measured = None
+    if measured:
         if not -17 <= loud <= -11:
             problems.append(f"ПРОВАЛ: громкость {loud:.1f} LUFS, нужно около -14 (от -17 до -11)")
         else:
@@ -223,8 +289,12 @@ def check_cuts(workdir, problems, notes):
         problems.append("ПРОВАЛ: ролик обрывается на полуслове")
 
 
+def workdir_project(workdir):
+    return os.path.dirname(os.path.dirname(workdir))
+
+
 def make_frames(workdir):
-    frames = os.path.join(workdir, "кадры")
+    frames = own_output(workdir_project(workdir), os.path.join(workdir, "кадры"))
     os.makedirs(frames, exist_ok=True)
     ffmpeg_ok(["-i", os.path.join(workdir, "final.mp4"), "-vf", "fps=0.5,scale=540:-2",
                os.path.join(frames, "кадр_%02d.png")])
@@ -247,15 +317,20 @@ def main():
     final = os.path.join(workdir, "final.mp4")
     if not os.path.isfile(final):
         sys.exit("Нет final.mp4: сначала собери ролик (montage.py build).")
+    cut_plan_path = os.path.join(workdir, "cut-plan.json")
+    layout = load_json(cut_plan_path) if os.path.isfile(cut_plan_path) else {}
     problems, notes = [], []
     duration = check_format(final, problems, notes)
-    sample_count = check_picture(workdir, plan.get("face"), bool(plan.get("inserts")), bool(plan.get("style", {}).get("backdrop")), problems, notes)
+    sample_count = check_picture(workdir, plan.get("face"), bool(plan.get("inserts")), bool(plan.get("style", {}).get("backdrop")), layout, problems, notes)
     check_sound(final, duration, problems, notes)
     check_cuts(workdir, problems, notes)
+    for name in ("лист-кадров.png",):
+        own_output(project, os.path.join(workdir, name))
     frames = make_frames(workdir)
     report = {"verdict": "ПРОВАЛ" if problems else "ПРОЙДЕНО", "problems": problems, "notes": notes,
               "frames": frames, "contact_sheet": os.path.join(workdir, "лист-кадров.png"), "checked_samples": sample_count}
-    with open(os.path.join(workdir, "отчёт-критика.json"), "w", encoding="utf-8") as handle:
+    report_path = own_output(project, os.path.join(workdir, "отчёт-критика.json"))
+    with open(report_path, "w", encoding="utf-8") as handle:
         json.dump(report, handle, ensure_ascii=False, indent=1)
     print("\n".join(problems + notes))
     print(f"\nИтог автоматической проверки: {report['verdict']}")

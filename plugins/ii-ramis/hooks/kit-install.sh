@@ -150,10 +150,10 @@ run_mode() {
   node_fresh() { command -v node >/dev/null 2>&1 && node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=20)?0:1)' 2>/dev/null; }
   if [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1 && ! declined; then
     export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_ENV_HINTS=1
-    if ! node_fresh; then
-      : >"$log"
-      if command -v node >/dev/null 2>&1; then brew upgrade node >>"$log" 2>&1; else brew install node >>"$log" 2>&1; fi
-      node_fresh && echo "поставил: node" || echo "node не обновился (см. журнал)"
+    # Только если Node нет совсем: чужой старый Node не обновляем молча (может сломать другие проекты ученика), он попадёт в notes.
+    if ! command -v node >/dev/null 2>&1; then
+      : >"$log"; brew install node >>"$log" 2>&1
+      node_fresh && echo "поставил: node" || echo "node не поставился (см. журнал)"
     fi
     if ! command -v ffmpeg >/dev/null 2>&1; then
       : >"$log"; brew install ffmpeg >>"$log" 2>&1

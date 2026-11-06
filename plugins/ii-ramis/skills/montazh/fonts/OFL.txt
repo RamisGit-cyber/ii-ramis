@@ -1,5 +1,7 @@
-Шрифт Onest (Onest-Regular.ttf, Onest-ExtraBold.ttf) — статические начертания, полученные из переменного шрифта Onest[wght].ttf.
-Copyright 2021 The Onest Project Authors (https://github.com/simpals/onest)
+Шрифты в этой папке — статические начертания, полученные из переменных шрифтов Google Fonts:
+Onest-Regular.ttf, Onest-Light.ttf, Onest-ExtraBold.ttf: Copyright 2021 The Onest Project Authors (https://github.com/simpals/onest)
+Oswald-Bold.ttf: Copyright 2016 The Oswald Project Authors (https://github.com/googlefonts/OswaldFont)
+CormorantGaramond-SemiBoldItalic.ttf: Copyright 2015 The Cormorant Project Authors (github.com/CatharsisFonts/Cormorant)
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is available with a FAQ at: https://openfontlicense.org

@@ -60,7 +60,7 @@ bash "$(ls -d "$HOME"/.claude/plugins/cache/ii-ramis/ii-ramis/*/ | sort -V | tai
 Скрипт делает то же, что раньше делал блок: навыки ставятся из клона, переключённого на закреплённый коммит (репозиторий без символических ссылок), Agent Reach скачивается и сверяется по SHA-256, `uv` скрипт не ставит (см. «Если нет uv»). Что нового в 2.5:
 - **HyperFrames** (HeyGen): основной набор из четырёх навыков (hyperframes, hyperframes-cli, hyperframes-registry, media-use) ставится из клона репозитория на закреплённом коммите `1ff4cef` (тег v0.9.12), как остальные навыки. Собственный установщик HyperFrames (`hyperframes skills update`) НЕ используется: он тянет другую версию `skills` и ссылки на тег. Сам CLI `hyperframes` не ставится; при первом `npx hyperframes` статистика у него включена по умолчанию, поэтому ученику при работе с видео скажи про `HYPERFRAMES_NO_TELEMETRY=1` или `hyperframes telemetry disable`.
 - **Remotion**: навыки репозитория `remotion-dev/skills` (13 штук, главный `remotion-best-practices`) на коммите `c7cb2fd`.
-- Предварительные условия проверяются, но не ломают остальное: нет Node 22.20+ или git — навыки через `npx` честно пишутся как не поставленные, `superpowers` и `playwright` ставятся отдельно; нет `ffmpeg` — это не ошибка установки, скрипт записывает `ffmpeg` в `notes`. С 2.6: на Mac с Homebrew хук сам ставит Node (`brew install node`, если нет или старше 22.20) и `ffmpeg` (`brew install ffmpeg`) без вопросов, это домашка урока 5; на Windows это делает блок ниже через `winget` (`OpenJS.NodeJS.LTS`, `Gyan.FFmpeg`).
+- Предварительные условия проверяются, но не ломают остальное: нет Node 22.20+ или git — навыки через `npx` честно пишутся как не поставленные, `superpowers` и `playwright` ставятся отдельно; нет `ffmpeg` — это не ошибка установки, скрипт записывает `ffmpeg` в `notes`. С 2.6: на Mac с Homebrew хук сам ставит Node (`brew install node`, только если Node нет совсем; старый Node молча не обновляется, а попадает в `notes`, и ИИ Рамис предлагает обновить с «да» ученика) и `ffmpeg` (`brew install ffmpeg`) без вопросов, это домашка урока 5; на Windows это делает блок ниже через `winget` (`OpenJS.NodeJS.LTS`, `Gyan.FFmpeg`).
 - Состояние пишется в `~/.ii-ramis/nabor.json`: `status` (`installing`, `ok`, `partial`, `declined`), `tries`, `missing` (что не поставилось), `notes` (`ffmpeg`, `uv`, `node`, `git`, `claude`, `21st`). Журнал последней установки: `~/.ii-ramis/nabor.log`.
 - «Уже поставлено» — это `status: ok` с `kit` не ниже `2.6.0`: хук молчит и ничего не запускает. Отказ — `status: declined`: хук молчит, скрипт останавливается на следующем шаге. `II_RAMIS_NO_KIT=1` в окружении отключает хук совсем.
 
@@ -163,8 +163,10 @@ else {
   $gdir = Join-Path $Work 'gsap'
   git clone -q 'https://github.com/greensock/gsap-skills.git' $gdir *> $null
   git -C $gdir checkout -q 'aed9cfd3277740755f6bfc1155c7aa645403b760' *> $null
-  npx.cmd --yes $SkillsCli add $gdir --skill gsap-core gsap-frameworks gsap-performance gsap-plugins gsap-react gsap-scrolltrigger gsap-timeline gsap-utils -g -a claude-code -y --copy *> $null
-  if (Has-Skill 'gsap-core') { Done 'gsap' } else { Fail 'gsap' 'нужны git и Node 22.20 или новее' }
+  $links = @(Get-ChildItem -LiteralPath $gdir -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and $_.FullName -notmatch '[\\/]\.git[\\/]' -and $_.Name -notin @('CLAUDE.md','GEMINI.md') })
+  if ($links.Count -gt 0) { Fail 'gsap' 'в репозитории есть символические ссылки'; $gdir = $null }
+  if ($gdir) { npx.cmd --yes $SkillsCli add $gdir --skill gsap-core gsap-frameworks gsap-performance gsap-plugins gsap-react gsap-scrolltrigger gsap-timeline gsap-utils -g -a claude-code -y --copy *> $null
+    if (Has-Skill 'gsap-core') { Done 'gsap' } else { Fail 'gsap' 'нужны git и Node 22.20 или новее' } }
 }
 
 # HyperFrames: основной набор навыков от HeyGen из клона на закреплённом коммите

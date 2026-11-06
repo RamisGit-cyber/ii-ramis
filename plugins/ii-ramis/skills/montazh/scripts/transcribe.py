@@ -22,7 +22,12 @@ def parse_args(argv):
     options = {"model": "small", "lang": None}
     for flag in ("--model", "--lang"):
         if flag in argv:
-            options[flag[2:]] = argv[argv.index(flag) + 1]
+            position = argv.index(flag) + 1
+            if position >= len(argv):
+                sys.exit(f"После {flag} нужно значение")
+            options[flag[2:]] = argv[position]
+    if options["lang"] is not None and not options["lang"].isalpha():
+        sys.exit("Язык: двухбуквенный код, например ru или en")
     if options["model"] not in MODELS:
         sys.exit("Модель: small (точнее) или base (быстрее)")
     return argv[1], argv[2], options
@@ -32,6 +37,9 @@ def main():
     video, out_path, options = parse_args(sys.argv)
     if not os.path.isfile(video):
         sys.exit(f"Нет файла: {video}")
+    out_parts = os.path.normpath(os.path.realpath(os.path.dirname(os.path.abspath(out_path)))).split(os.sep)
+    if not out_path.endswith(".json") or "_монтаж" not in out_parts:
+        sys.exit("Результат пишется только в .json внутри папки _монтаж проекта")
     from faster_whisper import WhisperModel
 
     repo, revision = MODELS[options["model"]]
