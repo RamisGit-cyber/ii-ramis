@@ -286,18 +286,29 @@ Mac и Linux (нужны `uv` и `git`; песочница не даёт пис�
 bash "$(ls -d "$HOME"/.claude/plugins/cache/ii-ramis/ii-ramis/*/ | sort -V | tail -1)hooks/kit-install.sh" --earshot
 ```
 
-Скрипт делает: окружение `~/.ii-ramis/earshot` (Python 3.12), `torch==2.14.1` с CPU-индекса PyTorch, пакет Earshot с GitHub на коммите `591fa3e` и `mcp==2.3.0`, `earshot doctor --fetch` (модели), `claude mcp add --scope user earshot`. Проверка: `~/.ii-ramis/earshot/bin/earshot doctor` без строки `problems`.
+Скрипт не работает, если есть отметка отказа `~/.ii-ramis/earshot-declined`. Он делает: окружение `~/.ii-ramis/earshot` (Python 3.12), всё из свежей пустой временной папки с `UV_NO_CONFIG=1` и сброшенными переменными индексов, `torch==2.14.1` с CPU-индекса PyTorch, пакет Earshot с GitHub на коммите `591fa3e` и `mcp==2.3.0` с индекса pypi.org и файлом точных версий `earshot-constraints.txt` (хеши не закреплены: остаточный риск, ставится только по «да»), `earshot doctor --fetch` (модели), `claude mcp add --scope user earshot`. Сообщение «Earshot поставлен и подключён» скрипт печатает только после того, как MCP `earshot` реально появился в `~/.claude.json`; иначе честно говорит, что подключение не удалось. Проверка: `~/.ii-ramis/earshot/bin/earshot doctor` без строки `problems`.
 
 Windows (PowerShell, нужен `uv`; песочницы нет):
 
 ```powershell
+if (Test-Path "$HOME\.ii-ramis\earshot-declined") { 'Ученик отказался от Earshot, не ставлю'; return }
+$c = (Get-ChildItem "$HOME\.claude\plugins\cache\ii-ramis\ii-ramis\*\skills\nabor\references\earshot-constraints.txt" | Sort-Object FullName | Select-Object -Last 1).FullName
+if (-not $c) { 'нет файла ограничений версий, не ставлю'; return }
+# Свежая пустая папка и без чужих настроек uv и pip: uv.toml, pyproject и переменные с индексами не подмешаются
+$tmp = Join-Path ([IO.Path]::GetTempPath()) ('earshot-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory $tmp | Out-Null
+Push-Location $tmp
+$env:UV_NO_CONFIG = '1'
+foreach ($n in 'UV_INDEX_URL','UV_EXTRA_INDEX_URL','UV_INDEX','UV_DEFAULT_INDEX','PIP_INDEX_URL','PIP_EXTRA_INDEX_URL') { Remove-Item "Env:$n" -ErrorAction SilentlyContinue }
 $e = "$HOME\.ii-ramis\earshot"
 uv venv $e --python 3.12
 uv pip install --python "$e\Scripts\python.exe" "torch==2.14.1" --index-url https://download.pytorch.org/whl/cpu
-uv pip install --python "$e\Scripts\python.exe" "git+https://github.com/Leonxlnx/earshot@591fa3e028032e6dce56620a20e932e35667e8d8" "mcp==2.3.0"
+uv pip install --python "$e\Scripts\python.exe" --index-url https://pypi.org/simple --constraint $c "git+https://github.com/Leonxlnx/earshot@591fa3e028032e6dce56620a20e932e35667e8d8" "mcp==2.3.0"
 & "$e\Scripts\earshot.exe" doctor --fetch
 claude mcp add --scope user earshot -- "$e\Scripts\python.exe" -m earshot mcp
-Remove-Item "$HOME\.ii-ramis\earshot-declined" -ErrorAction SilentlyContinue
+Pop-Location
+Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+if (((Get-Content "$HOME\.claude.json" -Raw | ConvertFrom-Json).mcpServers.PSObject.Properties.Name) -contains 'earshot') { Remove-Item "$HOME\.ii-ramis\earshot-declined" -ErrorAction SilentlyContinue; 'Earshot поставлен и подключён' } else { 'Earshot скачан, но MCP не подключился: скажи ученику честно' }
 ```
 
 Проверено на Linux, на чужом Mac и Windows не проверено. После установки нужна новая сессия.

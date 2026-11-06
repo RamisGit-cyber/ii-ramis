@@ -28,6 +28,9 @@ const settingsFile = join(dir, 'svodka.json');
 const kitFile = join(dir, 'nabor.json');
 const logFile = join(dir, 'svodka.log');
 const earshotDeclinedFile = join(dir, 'earshot-declined');
+// Отказ проверяется первым. Согласие только с начала реплики и без вопроса («сколько места надо, чтобы поставить earshot?» установкой не считается)
+const EARSHOT_NO = /не\s+(хочу|надо|нужно|буду|стоит)?\s*(став(ь|ить)|предлагай)\s+earshot|нет,?\s+earshot|earshot\s+(мне\s+)?не\s+нужен/;
+const EARSHOT_YES = /^\s*(пожалуйста,?\s*)?(по)?став(ь|ить)\s+(мне\s+)?earshot/;
 
 const readJson = (file) => { try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return null; } };
 const writeJson = (file, value) => {
@@ -132,13 +135,13 @@ function promptMode() {
   } else if (/(снова|опять)\s+(отправляй|присылай)\s+сводк/.test(text)) {
     writeJson(settingsFile, { ...(readJson(settingsFile) ?? {}), consent: true });
     say('отправка сводок снова включена. Подтверди одной строкой.');
-  } else if (/не\s+(став(ь|ить)|предлагай)\s+earshot|earshot\s+(мне\s+)?не\s+нужен/.test(text)) {
+  } else if (EARSHOT_NO.test(text)) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     writeFileSync(earshotDeclinedFile, '1\n', { mode: 0o600 });
     say('отказ от Earshot записан в ~/.ii-ramis/earshot-declined. Подтверди одной строкой и больше не предлагай (ученик может сам попросить позже).');
-  } else if (/(по)?став(ь|ить)\s+(мне\s+)?earshot/.test(text)) {
+  } else if (EARSHOT_YES.test(text) && !text.includes('?')) {
     rmSync(earshotDeclinedFile, { force: true });
-    say('ученик просит Earshot: отметка отказа снята. Поставь по разделу «Earshot по желанию» в nabor/references/ustanovka.md.');
+    say('ученик просит Earshot: отметка отказа снята. Поставь по разделу «Earshot» в nabor/references/ustanovka.md.');
   } else if (/не\s+став(ь|ить)\s+набор/.test(text)) {
     writeJson(kitFile, { kit: PLUGIN_VERSION, status: 'declined' });
     say('отказ от набора записан в ~/.ii-ramis/nabor.json, установка остановится на следующем шаге. Подтверди ученику одной строкой, больше не предлагай.');

@@ -122,10 +122,21 @@ try {
   check(JSON.parse(readFileSync(join(talker, '.ii-ramis', 'nabor.json'), 'utf8')).status === 'declined', '«не ставь набор» должно записать status=declined');
   await prompt(talker, 'ладно, поставь набор');
   check(!existsSync(join(talker, '.ii-ramis', 'nabor.json')), '«поставь набор» снимает отказ');
-  await prompt(talker, 'не ставь Earshot, не надо');
-  check(existsSync(join(talker, '.ii-ramis', 'earshot-declined')), '«не ставь Earshot» записывает отметку отказа');
-  await prompt(talker, 'ну ладно, поставь Earshot');
-  check(!existsSync(join(talker, '.ii-ramis', 'earshot-declined')), '«поставь Earshot» снимает отметку');
+  const marker = join(talker, '.ii-ramis', 'earshot-declined');
+  for (const phrase of ['не ставь Earshot, не надо', 'Не хочу ставить Earshot', 'не надо ставить earshot', 'не нужно ставить Earshot', 'нет, Earshot', 'Earshot не нужен']) {
+    rmSync(marker, { force: true });
+    await prompt(talker, phrase);
+    check(existsSync(marker), `«${phrase}» записывает отметку отказа Earshot`);
+  }
+  await prompt(talker, 'сколько места надо, чтобы поставить earshot?');
+  check(existsSync(marker), 'вопрос про место снимать отказ не должен');
+  await prompt(talker, 'ну ладно, потом поставь Earshot');
+  check(existsSync(marker), '«поставь Earshot» не с начала реплики отказ не снимает');
+  await prompt(talker, 'Пожалуйста, поставь Earshot');
+  check(!existsSync(marker), '«поставь Earshot» с начала реплики снимает отметку');
+  rmSync(marker, { force: true });
+  await prompt(talker, 'сколько места надо, чтобы поставить earshot?');
+  check(!existsSync(marker), 'вопрос про место отказ не создаёт');
   const plain = await prompt(newHome(), 'сделай мне сайт про кофейню');
   check(plain.out === '', 'обычный запрос хук не трогает');
   const notSet = newHome();

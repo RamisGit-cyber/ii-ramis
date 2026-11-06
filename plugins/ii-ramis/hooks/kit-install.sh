@@ -286,20 +286,37 @@ run_mode() {
 
 # Earshot («уши» для Claude): ТОЛЬКО по «да» ученика, вручную через окно «Bash command (unsandboxed)». Не входит ни в --auto, ни в --run.
 earshot_mode() {
-  local home_dir="$STATE_DIR/earshot" claude_bin
+  local home_dir="$STATE_DIR/earshot" claude_bin constraints tmp mcp_ok
   mkdir -p "$STATE_DIR"
+  # Ученик отказался от Earshot: ничего не ставим (снять отказ может только его «поставь Earshot», это делает хук)
+  [ -f "$STATE_DIR/earshot-declined" ] && { echo "отказ от Earshot записан, не ставлю"; return 0; }
   command -v uv >/dev/null 2>&1 || { echo "ЖДЁТ uv: Earshot (см. «Если нет uv» в ustanovka.md)"; return 0; }
   command -v git >/dev/null 2>&1 || { echo "нужен git"; return 0; }
+  constraints="$(cd "$(dirname "$SELF")/.." 2>/dev/null && pwd)/skills/nabor/references/earshot-constraints.txt"
+  [ -f "$constraints" ] || { echo "нет файла ограничений версий, не ставлю"; return 0; }
   claude_bin="$(find_claude)"
-  [ -x "$home_dir/bin/earshot" ] || {
-    uv venv "$home_dir" --python 3.12 || { echo "НЕ ПОСТАВИЛОСЬ: Earshot (uv venv)"; return 0; }
-    uv pip install --python "$home_dir/bin/python" "torch==2.14.1" --index-url "$PYTORCH_CPU_INDEX" || { echo "НЕ ПОСТАВИЛОСЬ: Earshot (torch)"; return 0; }
-    uv pip install --python "$home_dir/bin/python" "git+https://github.com/Leonxlnx/earshot@$EARSHOT_SHA" "mcp==2.3.0" || { echo "НЕ ПОСТАВИЛОСЬ: Earshot (пакет)"; return 0; }
-  }
-  "$home_dir/bin/earshot" doctor --fetch || { echo "НЕ ПОСТАВИЛОСЬ: Earshot (модели)"; return 0; }
-  if [ -n "$claude_bin" ]; then "$claude_bin" mcp add --scope user earshot -- "$home_dir/bin/python" -m earshot mcp || echo "MCP не подключился"; else echo "claude не найден: MCP подключить вручную"; fi
-  rm -f "$STATE_DIR/earshot-declined"
-  echo "Earshot поставлен: $home_dir"
+  # Работаем из свежей пустой временной папки и без чужих настроек uv и pip: uv.toml, pyproject и переменные с индексами из папки или окружения ученика не подмешаются
+  tmp="$(mktemp -d)" || return 0
+  (
+    cd "$tmp" || exit 1
+    unset UV_INDEX_URL UV_EXTRA_INDEX_URL UV_INDEX UV_DEFAULT_INDEX PIP_INDEX_URL PIP_EXTRA_INDEX_URL
+    export UV_NO_CONFIG=1
+    if [ ! -x "$home_dir/bin/earshot" ]; then
+      uv venv "$home_dir" --python 3.12 || { echo "НЕ ПОСТАВИЛОСЬ: Earshot (uv venv)"; exit 1; }
+      uv pip install --python "$home_dir/bin/python" "torch==2.14.1" --index-url "$PYTORCH_CPU_INDEX" || { echo "НЕ ПОСТАВИЛОСЬ: Earshot (torch)"; exit 1; }
+      uv pip install --python "$home_dir/bin/python" --index-url https://pypi.org/simple --constraint "$constraints" "git+https://github.com/Leonxlnx/earshot@$EARSHOT_SHA" "mcp==2.3.0" || { echo "НЕ ПОСТАВИЛОСЬ: Earshot (пакет)"; exit 1; }
+    fi
+    "$home_dir/bin/earshot" doctor --fetch || { echo "НЕ ПОСТАВИЛОСЬ: Earshot (модели)"; exit 1; }
+  ) || { rmdir "$tmp" 2>/dev/null; return 0; }
+  rmdir "$tmp" 2>/dev/null
+  if [ -n "$claude_bin" ]; then "$claude_bin" mcp add --scope user earshot -- "$home_dir/bin/python" -m earshot mcp >/dev/null 2>&1; fi
+  mcp_ok="$(node -e "const fs=require('fs'),os=require('os');try{const j=JSON.parse(fs.readFileSync(os.homedir()+'/.claude.json','utf8'));console.log(j.mcpServers&&j.mcpServers.earshot?'yes':'no')}catch(e){console.log('no')}" 2>/dev/null)"
+  if [ "$mcp_ok" = "yes" ]; then
+    rm -f "$STATE_DIR/earshot-declined"
+    echo "Earshot поставлен и подключён: $home_dir"
+  else
+    echo "Earshot скачан, но MCP не подключился (claude mcp add не прошёл): скажи ученику, что подключение не удалось; подключить вручную: claude mcp add --scope user earshot -- $home_dir/bin/python -m earshot mcp"
+  fi
 }
 
 case "${1:-}" in
