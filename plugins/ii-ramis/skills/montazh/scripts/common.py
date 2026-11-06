@@ -59,6 +59,19 @@ def number(value, low, high, name):
     return value
 
 
+def clean_face(face):
+    """Рамка лица из плана: четыре числа в пределах кадра (иначе отказ)."""
+    if not face:
+        return None
+    return {"x": number(face.get("x"), 0, W, "face.x"), "y": number(face.get("y"), 0, H, "face.y"),
+            "w": number(face.get("w"), 10, W, "face.w"), "h": number(face.get("h"), 10, H, "face.h")}
+
+
+def limit_count(items, maximum, name):
+    if len(items or []) > maximum:
+        sys.exit(f"В плане слишком много элементов {name}: не больше {maximum}")
+
+
 def media_file(project, relative):
     """Файл внутри проекта, настоящее медиа (не плейлист и не текст, переименованный в .mp4)."""
     full = project_path(project, relative)
@@ -74,6 +87,42 @@ def own_output(project, path):
     if os.path.islink(path) or not inside(project, path):
         sys.exit(f"Не пишу сюда, путь ведёт за пределы проекта: {os.path.relpath(path, project)}")
     return path
+
+
+def write_bytes(project, path, data):
+    """Запись файла только внутри проекта и никогда по ссылке: O_NOFOLLOW не даёт открыть symlink."""
+    own_output(project, path)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    try:
+        descriptor = os.open(path, flags, 0o644)
+    except OSError as error:
+        sys.exit(f"Не могу записать {os.path.relpath(path, project)}: {error.strerror}")
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(data)
+
+
+def write_text(project, path, text):
+    write_bytes(project, path, text.encode("utf-8"))
+
+
+def require_no_links(project, folder):
+    """Папка, куда ffmpeg будет писать файлы: самой папки-ссылки и ссылок внутри быть не должно."""
+    own_output(project, folder)
+    for root, dirs, files in os.walk(folder):
+        for name in dirs + files:
+            if os.path.islink(os.path.join(root, name)):
+                sys.exit(f"В рабочей папке лежит ссылка, не пишу туда: {os.path.relpath(os.path.join(root, name), project)}")
+
+
+def copy_fonts(project, source_dir, target_dir):
+    """Шрифты копируются по одному, каждый файл проверяется отдельно."""
+    own_output(project, target_dir)
+    os.makedirs(target_dir, exist_ok=True)
+    for name in sorted(os.listdir(source_dir)):
+        source = os.path.join(source_dir, name)
+        if os.path.isfile(source) and not os.path.islink(source):
+            with open(source, "rb") as handle:
+                write_bytes(project, os.path.join(target_dir, name), handle.read())
 
 
 def run(args, cwd=None, capture=False):

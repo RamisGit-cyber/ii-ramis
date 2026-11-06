@@ -10,13 +10,12 @@
 import json
 import os
 import re
-import shutil
 import sys
 
 import math
 
 import layouts
-from common import H, SAFE, W, ffmpeg_ok, ffmpeg_text, inside, load_json, media_file, need, number, own_output, probe
+from common import H, SAFE, W, clean_face, copy_fonts, limit_count, write_bytes, ffmpeg_ok, ffmpeg_text, inside, load_json, media_file, need, number, own_output, probe, require_no_links, write_text
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FONTS_SRC = os.path.join(os.path.dirname(HERE), "fonts")
@@ -221,7 +220,7 @@ def measure_loudness(mix):
         raw = json.loads(blocks[-1])
         keys = ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset")
         values = {key: float(raw[key]) for key in keys}
-    except (ValueError, KeyError):
+    except (ValueError, KeyError, TypeError):
         return None
     return values if all(math.isfinite(v) for v in values.values()) else None
 
@@ -267,11 +266,17 @@ def inserts_chain(project, plan, segments, last, first_slot):
 def build(project, plan_path):
     need("ffmpeg"), need("ffprobe")
     plan = load_json(plan_path)
+    plan["face"] = clean_face(plan.get("face"))
+    for key, maximum in (("keep", 80), ("cards", 400), ("inserts", 20)):
+        limit_count(plan.get(key), maximum, key)
+    limit_count((plan.get("split") or {}).get("panels"), 20, "split.panels")
     name = re.sub(r"[^\w\-]+", "_", plan.get("name", "reel"), flags=re.U).strip("_") or "reel"
     workdir = os.path.join(project, "_монтаж", name)
     if not inside(project, workdir):
         sys.exit("Рабочая папка вне проекта.")
     os.makedirs(workdir, exist_ok=True)
+    own_output(project, workdir)
+    require_no_links(project, os.path.join(workdir, "fonts")) if os.path.isdir(os.path.join(workdir, "fonts")) else None
     for name in ("base.mp4", "mix.wav", "final.mp4", "subs.ass", "fonts", "cut-plan.json"):
         own_output(project, os.path.join(workdir, name))  # не пишем по ссылкам, ведущим за пределы проекта
     source = media_file(project, plan["source"])
@@ -283,10 +288,8 @@ def build(project, plan_path):
     base = build_base(project, plan, workdir, segments)
     cards = make_cards(plan, segments)
     windows = layouts.plan_splits(project, plan, map_interval, segments)
-    with open(os.path.join(workdir, "subs.ass"), "w", encoding="utf-8") as handle:
-        handle.write(build_ass(cards, plan.get("style", {}), windows, plan.get("face")))
-    fonts_dir = os.path.join(workdir, "fonts")
-    shutil.copytree(FONTS_SRC, fonts_dir, dirs_exist_ok=True)
+    write_text(project, os.path.join(workdir, "subs.ass"), build_ass(cards, plan.get("style", {}), windows, plan.get("face")))
+    copy_fonts(project, FONTS_SRC, os.path.join(workdir, "fonts"))
     mix = mix_audio(project, plan, workdir, base)
     loudness = loudnorm_filter(measure_loudness(mix))
     split_inputs, split_graph, last = layouts.split_graph(windows, "vs", 1)
@@ -302,14 +305,14 @@ def build(project, plan_path):
          "-movflags", "+faststart", "-shortest", "final.mp4"],
         cwd=workdir,
     )
-    with open(os.path.join(workdir, "cut-plan.json"), "w", encoding="utf-8") as handle:
-        json.dump({"segments": segments, "cards": cards, "splits": [
+    cut_plan = json.dumps({"segments": segments, "cards": cards, "splits": [
             {"a": w["a"], "b": w["b"], "seam": w["seam"], "y0": w["y0"]} for w in windows],
             "preset": plan.get("style", {}).get("preset", "classic"),
             "text_color": plan.get("style", {}).get(
                 "text", "#F3EBDD" if plan.get("style", {}).get("preset") == "afisha" else "#FFFFFF"),
             "main_color": plan.get("style", {}).get("main", plan.get("style", {}).get("text", "#F3EBDD")),
-            "face_top": (plan.get("face") or {}).get("y")}, handle, ensure_ascii=False, indent=1)
+            "face_top": (plan.get("face") or {}).get("y")}, ensure_ascii=False, indent=1)
+    write_text(project, os.path.join(workdir, "cut-plan.json"), cut_plan)
     print(f"Готово к проверке: {final}")
 
 
@@ -326,8 +329,8 @@ def export(project, plan_path):
     while os.path.exists(target):  # чужие и прошлые файлы не перезаписываем
         version += 1
         target = os.path.join(out_dir, f"{name}-v{version}.mp4")
-    own_output(project, target)
-    shutil.copyfile(final, target)
+    with open(final, "rb") as handle:
+        write_bytes(project, target, handle.read())
     print(f"Ролик лежит здесь: {target}")
 
 

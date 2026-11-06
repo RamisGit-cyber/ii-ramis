@@ -11,7 +11,7 @@ import re
 import subprocess
 import sys
 
-from common import H, SAFE, W, ffmpeg_ok, ffmpeg_text, guarded, inside, load_json, need, own_output, probe
+from common import clean_face, H, SAFE, W, ffmpeg_ok, ffmpeg_text, guarded, inside, load_json, need, own_output, probe, require_no_links, write_text
 
 SAMPLE_FPS = 2
 SMALL_W, SMALL_H = 540, 960
@@ -108,10 +108,8 @@ def check_picture(workdir, face, has_inserts, backdrop, layout, problems, notes)
     # Для маски все цвета букв заменяются белым: тёмный текст на чёрном фоне иначе не виден
     ass_text = open(os.path.join(workdir, "subs.ass"), encoding="utf-8").read()
     ass_text = re.sub(r"\\1c&H[0-9A-Fa-f]{6,8}&?", r"\\1c&HFFFFFF&", ass_text)
-    ass_text = re.sub(r"(Style: [^\n]*?),&H[0-9A-Fa-f]{8},&H[0-9A-Fa-f]{8},", r"\1,&H00FFFFFF,&H00FFFFFF,", ass_text)
-    mask_path = own_output(os.path.dirname(os.path.dirname(workdir)), os.path.join(workdir, "subs-mask.ass"))
-    with open(mask_path, "w", encoding="utf-8") as handle:
-        handle.write(ass_text)
+    ass_text = re.sub(r"^(Style: [^\n]*?),&H[0-9A-Fa-f]{8},&H[0-9A-Fa-f]{8},", r"\1,&H00FFFFFF,&H00FFFFFF,", ass_text, flags=re.M)
+    write_text(os.path.dirname(os.path.dirname(workdir)), os.path.join(workdir, "subs-mask.ass"), ass_text)
     mask_args = ["-f", "lavfi", "-i", f"color=c=black:s={W}x{H}:r=30:d={duration:.2f}",
                  "-vf", f"ass=filename=subs-mask.ass:fontsdir=fonts,{fit}"]
     text_boxes = [bright_boxes(f, TEXT_LEVEL, 1) for f in gray_frames(mask_args, workdir)]
@@ -231,7 +229,7 @@ def check_sound(final, duration, problems, notes):
     try:
         measured = json.loads(blocks[-1]) if blocks else None
         loud, true_peak = (float(measured["input_i"]), float(measured["input_tp"])) if measured else (None, None)
-    except (ValueError, KeyError):
+    except (ValueError, KeyError, TypeError):
         measured = None
     if measured:
         if not -17 <= loud <= -11:
@@ -294,8 +292,10 @@ def workdir_project(workdir):
 
 
 def make_frames(workdir):
-    frames = own_output(workdir_project(workdir), os.path.join(workdir, "кадры"))
+    frames = os.path.join(workdir, "кадры")
+    own_output(workdir_project(workdir), frames)
     os.makedirs(frames, exist_ok=True)
+    require_no_links(workdir_project(workdir), frames)  # ffmpeg пишет внутрь: ссылок там быть не должно
     ffmpeg_ok(["-i", os.path.join(workdir, "final.mp4"), "-vf", "fps=0.5,scale=540:-2",
                os.path.join(frames, "кадр_%02d.png")])
     ffmpeg_ok(["-i", os.path.join(workdir, "final.mp4"), "-vf", "fps=0.5,scale=270:-2,tile=6x4",
@@ -314,6 +314,7 @@ def main():
     plan = load_json(plan_path)
     name = re.sub(r"[^\w\-]+", "_", plan.get("name", "reel"), flags=re.U).strip("_") or "reel"
     workdir = os.path.join(project, "_монтаж", name)
+    own_output(project, workdir)
     final = os.path.join(workdir, "final.mp4")
     if not os.path.isfile(final):
         sys.exit("Нет final.mp4: сначала собери ролик (montage.py build).")
@@ -321,7 +322,7 @@ def main():
     layout = load_json(cut_plan_path) if os.path.isfile(cut_plan_path) else {}
     problems, notes = [], []
     duration = check_format(final, problems, notes)
-    sample_count = check_picture(workdir, plan.get("face"), bool(plan.get("inserts")), bool(plan.get("style", {}).get("backdrop")), layout, problems, notes)
+    sample_count = check_picture(workdir, clean_face(plan.get("face")), bool(plan.get("inserts")), bool(plan.get("style", {}).get("backdrop")), layout, problems, notes)
     check_sound(final, duration, problems, notes)
     check_cuts(workdir, problems, notes)
     for name in ("лист-кадров.png",):
@@ -329,9 +330,7 @@ def main():
     frames = make_frames(workdir)
     report = {"verdict": "ПРОВАЛ" if problems else "ПРОЙДЕНО", "problems": problems, "notes": notes,
               "frames": frames, "contact_sheet": os.path.join(workdir, "лист-кадров.png"), "checked_samples": sample_count}
-    report_path = own_output(project, os.path.join(workdir, "отчёт-критика.json"))
-    with open(report_path, "w", encoding="utf-8") as handle:
-        json.dump(report, handle, ensure_ascii=False, indent=1)
+    write_text(project, os.path.join(workdir, "отчёт-критика.json"), json.dumps(report, ensure_ascii=False, indent=1))
     print("\n".join(problems + notes))
     print(f"\nИтог автоматической проверки: {report['verdict']}")
     print(f"Кадры каждые 2 с для глаз: {frames}\nЛист кадров: {report['contact_sheet']}")
