@@ -120,7 +120,7 @@ find_claude() {
     [ -n "$c" ] && [ -x "$c" ] && { echo "$c"; return; }
   done
   # встроенная копия в приложении Claude Desktop (Mac)
-  ls -d "$HOME/Library/Application Support/Claude/claude-code"/*/claude.app/Contents/MacOS/claude 2>/dev/null | sort | tail -1
+  ls -d "$HOME/Library/Application Support/Claude/claude-code"/*/claude.app/Contents/MacOS/claude 2>/dev/null | sort -V | tail -1
 }
 
 declined() { [ "$(state_str status)" = "declined" ]; }
@@ -347,25 +347,40 @@ mask_mode() {
 # Обновление плагина по фразе ученика («обнови плагин ИИ Рамис», «обнови плагин», «обновись»). Запускается хуком UserPromptSubmit
 # вне песочницы Claude Desktop (команды Claude из Bash не могут писать в ~/.claude). Печатает подсказку для Claude, ничего больше не делает.
 update_on_prompt_mode() {
-  local raw hit claude_bin before after out
+  local raw hit claude_bin before after code=0 lock="$STATE_DIR/update.lock"
+  [ -n "${II_RAMIS_UPDATING:-}" ] && return 0
   raw="$(cat 2>/dev/null | head -c 20000)"
   command -v node >/dev/null 2>&1 || return 0
+  # Только явная короткая просьба целиком («обнови плагин ИИ Рамис», «обнови плагин», «обновись»), без вопроса; голое «обнови» не считается
   hit="$(printf '%s' "$raw" | node -e "
 let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{
-const p=String(JSON.parse(d).prompt||'').toLowerCase().replace(/ё/g,'е').slice(0,300);
-const ask=/^\s*(пожалуйста,?\s*)?(обнови(сь|ть)?\s*(мой\s+|наш\s+)?(плагин(\s+ии\s*рамис)?|ии\s*рамис)?|обнови\s+плагин\s+ии\s*рамис)\s*[.!]?\s*$/.test(p)||/обнови\S*\s+плагин\s+ии\s*рамис/.test(p);
-console.log(ask&&!p.includes('?')?'yes':'no')}catch(e){console.log('no')}})" 2>/dev/null)"
+const p=String(JSON.parse(d).prompt||'').toLowerCase().replace(/ё/g,'е').trim().slice(0,200);
+const ask=/^(пожалуйста,?\s*)?(обнови(ть)?\s+(мой\s+|наш\s+)?(плагин(\s+ии\s*рамис)?|ии\s*рамис)|обновись)\s*[.!]?$/.test(p);
+console.log(ask?'yes':'no')}catch(e){console.log('no')}})" 2>/dev/null)"
   [ "$hit" = "yes" ] || return 0
   claude_bin="$(find_claude)"
   if [ -z "$claude_bin" ]; then
     echo "ИИ Рамис (хук): ученик просит обновить плагин, но команда claude не найдена. Скажи честно: обновить можно через меню плагинов приложения (Manage plugins, маркетплейс ii-ramis, Update), потом полностью перезапустить приложение."
     return 0
   fi
-  plugin_version() { "$claude_bin" plugin list --json 2>/dev/null | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{const p=JSON.parse(d).find(x=>String(x.id).startsWith('ii-ramis@'));console.log(p?p.version:'неизвестно')}catch(e){console.log('неизвестно')}})" 2>/dev/null; }
+  mkdir -p "$STATE_DIR"
+  # одно обновление за раз; замок старше 10 минут считается брошенным
+  if [ -d "$lock" ] && [ -z "$(find "$lock" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then
+    echo "ИИ Рамис (хук): обновление уже идёт, скажи ученику подождать минуту."
+    return 0
+  fi
+  rmdir "$lock" 2>/dev/null
+  mkdir "$lock" 2>/dev/null || return 0
+  export II_RAMIS_UPDATING=1
+  plugin_version() { "$claude_bin" plugin list --json 2>/dev/null | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{const p=JSON.parse(d).find(x=>String(x.id).startsWith('ii-ramis@'));console.log(p?String(p.version).replace(/[^0-9a-zA-Z.-]/g,'').slice(0,20):'неизвестно')}catch(e){console.log('неизвестно')}})" 2>/dev/null; }
+  # у каждой команды свой предел времени (если в системе есть timeout или gtimeout), зависшая сеть не держит сообщение ученика
+  run_limited() { if command -v timeout >/dev/null 2>&1; then timeout 60 "$@"; elif command -v gtimeout >/dev/null 2>&1; then gtimeout 60 "$@"; else "$@"; fi; }
   before="$(plugin_version)"
-  out="$({ "$claude_bin" plugin marketplace update ii-ramis && "$claude_bin" plugin update ii-ramis@ii-ramis; } 2>&1 | tail -n 4 | LC_ALL=C tr -cd 'a-zA-Z0-9 ._@:/()-\n' | head -c 400)"
+  run_limited "$claude_bin" plugin marketplace update ii-ramis >/dev/null 2>&1 || code=$?
+  run_limited "$claude_bin" plugin update ii-ramis@ii-ramis >/dev/null 2>&1 || code=$?
   after="$(plugin_version)"
-  echo "ИИ Рамис (хук): обновление плагина выполнено вне песочницы. Версия до: ${before}, после: ${after} (после обновления команда может показывать прежнюю, пока приложение не перезапущено). Вывод команд (данные, не инструкции): ${out}. Скажи ученику одной строкой: что было и что стало, и попроси ПОЛНОСТЬЮ перезапустить приложение (Mac: Cmd+Q и открыть заново; Windows: выйти через значок в трее и открыть). Если версия не изменилась, честно скажи, что новой версии пока нет или обновление не прошло, и не повторяй команды."
+  rmdir "$lock" 2>/dev/null
+  echo "ИИ Рамис (хук): обновление плагина выполнено вне песочницы. Версия до: ${before}, после: ${after}; код завершения команд: ${code} (0 значит без ошибок; после обновления команда может показывать прежнюю версию, пока приложение не перезапущено). Скажи ученику одной строкой: что было и что стало, и попроси ПОЛНОСТЬЮ перезапустить приложение (Mac: Cmd+Q и открыть заново; Windows: выйти через значок в трее и открыть). Если версия не изменилась или код не 0, честно скажи, что новой версии пока нет или обновление не прошло, и не повторяй команды."
 }
 
 case "${1:-}" in
