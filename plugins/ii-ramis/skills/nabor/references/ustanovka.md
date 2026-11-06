@@ -35,6 +35,7 @@ show emil-design-eng has_skill emil-design-eng
 show impeccable has_skill impeccable
 show hyperframes has_skill hyperframes
 show remotion has_skill remotion-best-practices
+show gsap has_skill gsap-core
 show agent-reach has_skill agent-reach
 echo "agent-reach работает: $(agent-reach version 2>/dev/null | head -c 160)"
 show superpowers has_plugin superpowers
@@ -59,9 +60,9 @@ bash "$(ls -d "$HOME"/.claude/plugins/cache/ii-ramis/ii-ramis/*/ | sort -V | tai
 Скрипт делает то же, что раньше делал блок: навыки ставятся из клона, переключённого на закреплённый коммит (репозиторий без символических ссылок), Agent Reach скачивается и сверяется по SHA-256, `uv` скрипт не ставит (см. «Если нет uv»). Что нового в 2.5:
 - **HyperFrames** (HeyGen): основной набор из четырёх навыков (hyperframes, hyperframes-cli, hyperframes-registry, media-use) ставится из клона репозитория на закреплённом коммите `1ff4cef` (тег v0.9.12), как остальные навыки. Собственный установщик HyperFrames (`hyperframes skills update`) НЕ используется: он тянет другую версию `skills` и ссылки на тег. Сам CLI `hyperframes` не ставится; при первом `npx hyperframes` статистика у него включена по умолчанию, поэтому ученику при работе с видео скажи про `HYPERFRAMES_NO_TELEMETRY=1` или `hyperframes telemetry disable`.
 - **Remotion**: навыки репозитория `remotion-dev/skills` (13 штук, главный `remotion-best-practices`) на коммите `c7cb2fd`.
-- Предварительные условия проверяются, но не ломают остальное: нет Node 22.20+ или git — навыки через `npx` честно пишутся как не поставленные, `superpowers` и `playwright` ставятся отдельно; нет `ffmpeg` — это не ошибка установки, скрипт записывает `ffmpeg` в `notes`.
+- Предварительные условия проверяются, но не ломают остальное: нет Node 22.20+ или git — навыки через `npx` честно пишутся как не поставленные, `superpowers` и `playwright` ставятся отдельно; нет `ffmpeg` — это не ошибка установки, скрипт записывает `ffmpeg` в `notes`. С 2.6: на Mac с Homebrew хук сам ставит Node (`brew install node`, только если Node нет совсем; старый Node молча не обновляется, а попадает в `notes`, и ИИ Рамис предлагает обновить с «да» ученика) и `ffmpeg` (`brew install ffmpeg`) без вопросов, это домашка урока 5; на Windows это делает блок ниже через `winget` (`OpenJS.NodeJS.LTS`, `Gyan.FFmpeg`).
 - Состояние пишется в `~/.ii-ramis/nabor.json`: `status` (`installing`, `ok`, `partial`, `declined`), `tries`, `missing` (что не поставилось), `notes` (`ffmpeg`, `uv`, `node`, `git`, `claude`, `21st`). Журнал последней установки: `~/.ii-ramis/nabor.log`.
-- «Уже поставлено» — это `status: ok` с `kit` не ниже `2.5.0`: хук молчит и ничего не запускает. Отказ — `status: declined`: хук молчит, скрипт останавливается на следующем шаге. `II_RAMIS_NO_KIT=1` в окружении отключает хук совсем.
+- «Уже поставлено» — это `status: ok` с `kit` не ниже `2.6.0`: хук молчит и ничего не запускает. Отказ — `status: declined`: хук молчит, скрипт останавливается на следующем шаге. `II_RAMIS_NO_KIT=1` в окружении отключает хук совсем.
 
 После установки навыкам нужна новая сессия (или `/reload-plugins` для плагинов): текущая сессия новые навыки не подхватит.
 
@@ -69,7 +70,7 @@ bash "$(ls -d "$HOME"/.claude/plugins/cache/ii-ramis/ii-ramis/*/ | sort -V | tai
 
 ### Что сказать про `notes`
 
-- `ffmpeg`: «Для рендера видео (HyperFrames, Remotion) нужна программа ffmpeg, её у тебя пока нет. Скажи мне «поставь ffmpeg»: я поставлю через Homebrew, если он есть (`brew install ffmpeg`), только после твоего «да». Остальной набор от этого не зависит». Сам не ставь.
+- `ffmpeg`: «Для рендера видео (HyperFrames, Remotion) нужна программа ffmpeg, её у тебя пока нет. Если у тебя есть Homebrew, плагин поставит её сам при следующем запуске; если нет, скачай сборку для Mac с ffmpeg.org/download.html (раздел macOS) или скажи Рамису на уроке. Остальной набор от этого не зависит».
 - `node`: «Нужен Node.js 22.20 или новее для части набора. Скачай с nodejs.org (кнопка LTS), установи двойным щелчком и перезапусти приложение: недостающее докачается само».
 - `git`: Mac предложит «Установить инструменты разработчика» — нажать «Установить», потом перезапустить.
 - `uv`: см. следующий раздел. `claude`: см. «Если `claude` не найден в PATH». `21st`: см. `klyuch-21st.md`.
@@ -95,6 +96,7 @@ Show 'emil-design-eng' (Has-Skill 'emil-design-eng')
 Show 'impeccable' (Has-Skill 'impeccable')
 Show 'hyperframes' (Has-Skill 'hyperframes')
 Show 'remotion' (Has-Skill 'remotion-best-practices')
+Show 'gsap' (Has-Skill 'gsap-core')
 Show 'agent-reach' (Has-Skill 'agent-reach')
 Show 'superpowers' (Has-Plugin 'superpowers')
 Show 'humanizer' ((Has-Skill 'humanizer') -or (Has-Plugin 'humanizer'))
@@ -120,6 +122,13 @@ function Has-Skill($n) { (Test-Path -LiteralPath "$HOME\.claude\skills\$n\SKILL.
 function Has-Plugin($n) { ((claude plugin list --json 2>$null) -join "`n") -match ('"id": "' + [regex]::Escape($n) + '@') }
 function Get-McpNames { $m = @(); try { $c = Get-Content -LiteralPath "$HOME\.claude.json" -Raw | ConvertFrom-Json; if ($c.mcpServers) { $m += $c.mcpServers.PSObject.Properties.Name }; foreach ($p in $c.projects.PSObject.Properties) { if ($p.Value.mcpServers) { $m += $p.Value.mcpServers.PSObject.Properties.Name } } } catch {}; $m }
 $script:Fails = 0
+# Node и ffmpeg (домашка урока 5): ставим официальным winget, без вопросов. После установки новое окно приложения подхватит PATH.
+function Node-Fresh { try { $v = [version]((node -v) -replace '^v',''); ($v.Major -gt 22) -or ($v.Major -eq 22 -and $v.Minor -ge 20) } catch { $false } }
+if ((Get-Command winget -ErrorAction SilentlyContinue)) {
+  if (-not (Node-Fresh)) { winget install --id OpenJS.NodeJS.LTS -e --silent --accept-package-agreements --accept-source-agreements *> $null }
+  if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { winget install --id Gyan.FFmpeg -e --silent --accept-package-agreements --accept-source-agreements *> $null }
+  $env:Path = [Environment]::GetEnvironmentVariable('Path','User') + ';' + [Environment]::GetEnvironmentVariable('Path','Machine') + ";$HOME\.local\bin"
+}
 function Ok($n) { "уже стоит: $n" }
 function Done($n) { "поставил: $n" }
 function Fail($n, $why) { "НЕ ПОСТАВИЛОСЬ: $n ($why)"; $script:Fails++ }
@@ -148,6 +157,18 @@ else {
   if (Has-Skill 'remotion-best-practices') { Done 'remotion' } else { Fail 'remotion' 'нужны git и Node 22.20 или новее' }
 }
 
+# GSAP: официальные навыки GreenSock (MIT) на закреплённом коммите, только gsap-*
+if (Has-Skill 'gsap-core') { Ok 'gsap' }
+else {
+  $gdir = Join-Path $Work 'gsap'
+  git clone -q 'https://github.com/greensock/gsap-skills.git' $gdir *> $null
+  git -C $gdir checkout -q 'aed9cfd3277740755f6bfc1155c7aa645403b760' *> $null
+  $links = @(Get-ChildItem -LiteralPath $gdir -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and $_.FullName -notmatch '[\\/]\.git[\\/]' -and $_.Name -notin @('CLAUDE.md','GEMINI.md') })
+  if ($links.Count -gt 0) { Fail 'gsap' 'в репозитории есть символические ссылки'; $gdir = $null }
+  if ($gdir) { npx.cmd --yes $SkillsCli add $gdir --skill gsap-core gsap-frameworks gsap-performance gsap-plugins gsap-react gsap-scrolltrigger gsap-timeline gsap-utils -g -a claude-code -y --copy *> $null
+    if (Has-Skill 'gsap-core') { Done 'gsap' } else { Fail 'gsap' 'нужны git и Node 22.20 или новее' } }
+}
+
 # HyperFrames: основной набор навыков от HeyGen из клона на закреплённом коммите
 if ((Has-Skill 'hyperframes') -and (Has-Skill 'hyperframes-cli')) { Ok 'hyperframes' }
 else {
@@ -157,7 +178,7 @@ else {
   npx.cmd --yes $SkillsCli add $hdir --skill hyperframes hyperframes-cli hyperframes-registry media-use -g -a claude-code -y --copy *> $null
   if ((Has-Skill 'hyperframes') -and (Has-Skill 'hyperframes-cli')) { Done 'hyperframes' } else { Fail 'hyperframes' 'нужен Node 22 или новее' }
 }
-if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { 'нет ffmpeg: нужен для рендера видео, скажи ученику как поставить (только с его «да»)' }
+if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { 'нет ffmpeg: winget не поставил, скажи ученику: закрыть и открыть приложение, потом повторить; иначе скачать сборку с gyan.dev/ffmpeg/builds' }
 
 if (Has-Plugin 'superpowers') { Ok 'superpowers' }
 elseif (-not (Get-Command claude -ErrorAction SilentlyContinue)) { Fail 'superpowers' 'команда claude не найдена' }
@@ -192,7 +213,7 @@ if (-not (($names -contains '21st') -or ($names -contains '21st-magic') -or ($na
 New-Item -ItemType Directory -Force "$HOME\.ii-ramis" | Out-Null
 $prev = 0; try { $prev = [int](Get-Content -LiteralPath "$HOME\.ii-ramis\nabor.json" -Raw | ConvertFrom-Json).tries } catch {}
 $status = if ($script:Fails -eq 0) { 'ok' } else { 'partial' }
-('{"kit":"2.5.0","lesson":5,"status":"' + $status + '","tries":' + ($prev + 1) + ',"missing":"","notes":""}') | Set-Content -LiteralPath "$HOME\.ii-ramis\nabor.json"
+('{"kit":"2.6.0","lesson":5,"status":"' + $status + '","tries":' + ($prev + 1) + ',"missing":"","notes":""}') | Set-Content -LiteralPath "$HOME\.ii-ramis\nabor.json"
 Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue
 "ошибок: $($script:Fails)"
 ```
