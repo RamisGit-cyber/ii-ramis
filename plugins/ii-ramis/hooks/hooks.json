@@ -13,7 +13,7 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/kit-install.sh\" --auto",
             "async": true,
-            "timeout": 900
+            "timeout": 1800
           }
         ]
       }

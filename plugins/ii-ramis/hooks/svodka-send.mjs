@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// ИИ Рамис 2.6: отправка сводки занятия и запись отказов хуками (вне песочницы Claude Desktop).
+// ИИ Рамис 2.7: отправка сводки занятия и запись отказов хуками (вне песочницы Claude Desktop).
 //
 // Почему хук: в 2.4 сводку слал Claude командой curl через Bash. В песочнице Desktop у Bash нет сети
 // (домены не из списка блокируются или ждут окна разрешения) и нет записи вне рабочей папки, поэтому
@@ -8,14 +8,14 @@
 // Режимы:
 //   --stop    хук Stop: ищет в последнем ответе Claude строку «📨 Сводка Рамису: …» и отправляет её.
 //   --prompt  хук UserPromptSubmit: понимает фразы ученика «не отправляй сводки», «снова отправляй сводки»,
-//             «не ставь набор», «поставь набор» и записывает выбор в файлы (Bash в песочнице писать туда не может).
+//             «не ставь набор», «поставь набор», «не ставь Earshot», «поставь Earshot» и записывает выбор в файлы (Bash в песочнице писать туда не может).
 // Всегда завершается кодом 0 и ничего не печатает (кроме одной строки подтверждения в режиме --prompt).
 import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync, renameSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-const PLUGIN_VERSION = '2.6.0';
+const PLUGIN_VERSION = '2.7.0';
 const ENDPOINT = process.env.II_RAMIS_TEST_ENDPOINT || 'https://fjxevxclomxlvhpjgbjs.supabase.co/rest/v1/sessions';
 // Публичный ключ роли anon: по настройкам базы умеет только добавлять строки в одну таблицу (не секрет).
 const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqeGV2eGNsb214bHZocGpnYmpzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM0NjEwOTQsImV4cCI6MjEwOTAzNzA5NH0.fabs-WOQqFDq2w-Be-J81m_Mg90dacS6xHoneZIqdWY';
@@ -27,6 +27,10 @@ const dir = join(homedir(), '.ii-ramis');
 const settingsFile = join(dir, 'svodka.json');
 const kitFile = join(dir, 'nabor.json');
 const logFile = join(dir, 'svodka.log');
+const earshotDeclinedFile = join(dir, 'earshot-declined');
+// Отказ проверяется первым. Согласие только с начала реплики и без вопроса («сколько места надо, чтобы поставить earshot?» установкой не считается)
+const EARSHOT_NO = /не\s+(хочу|надо|нужно|буду|стоит)?\s*(став(ь|ить)|предлагай)\s+earshot|нет,?\s+earshot|earshot\s+(мне\s+)?не\s+нужен/;
+const EARSHOT_YES = /^\s*(пожалуйста,?\s*)?(по)?став(ь|ить)\s+(мне\s+)?earshot/;
 
 const readJson = (file) => { try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return null; } };
 const writeJson = (file, value) => {
@@ -131,6 +135,13 @@ function promptMode() {
   } else if (/(снова|опять)\s+(отправляй|присылай)\s+сводк/.test(text)) {
     writeJson(settingsFile, { ...(readJson(settingsFile) ?? {}), consent: true });
     say('отправка сводок снова включена. Подтверди одной строкой.');
+  } else if (EARSHOT_NO.test(text)) {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(earshotDeclinedFile, '1\n', { mode: 0o600 });
+    say('отказ от Earshot записан в ~/.ii-ramis/earshot-declined. Подтверди одной строкой и больше не предлагай (ученик может сам попросить позже).');
+  } else if (EARSHOT_YES.test(text) && !text.includes('?')) {
+    rmSync(earshotDeclinedFile, { force: true });
+    say('ученик просит Earshot: отметка отказа снята. Поставь по разделу «Earshot» в nabor/references/ustanovka.md.');
   } else if (/не\s+став(ь|ить)\s+набор/.test(text)) {
     writeJson(kitFile, { kit: PLUGIN_VERSION, status: 'declined' });
     say('отказ от набора записан в ~/.ii-ramis/nabor.json, установка остановится на следующем шаге. Подтверди ученику одной строкой, больше не предлагай.');

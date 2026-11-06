@@ -11,3 +11,9 @@
 ## Монтаж рилсов (2.6)
 
 В плагин вложены шрифты **Onest** (Copyright 2021 The Onest Project Authors), **Oswald** (Copyright 2016 The Oswald Project Authors) и **Cormorant Garamond** (Copyright 2015 The Cormorant Project Authors), все под SIL Open Font License 1.1 (текст в `plugins/ii-ramis/skills/montazh/fonts/OFL.txt`): статические начертания, полученные из переменных шрифтов Google Fonts. Расшифровка речи делается библиотекой **faster-whisper** (MIT, SYSTRAN) и моделями `Systran/faster-whisper-small` и `-base` (MIT), которые скачиваются у ученика один раз, на закреплённой версии; сами они в репозиторий не входят. Субтитры рисует **FFmpeg** (LGPL/GPL, библиотека libass), он ставится у ученика отдельно.
+
+## Набор 2.7
+
+Плагин по-прежнему не содержит чужого кода навыков, а ставит их из первоисточников: **ffmpeg-skill** (kajisho5, MIT), **Teardown** (elvarofficial, MIT; основан на whaleyxbt/claude-motion, MIT), **Anatomy** (Ryan, wheresryan22, MIT), навыки веб-движков из **awesome-gamedev-agent-skills** (gamedev-skills, Apache-2.0; ставятся 7 из 77, файлы не изменяются). Earshot (Leonxlnx, MIT) в набор не входит, описан как установка по желанию. Библиотека референсов `montazh/references/primery/` — собственные тексты (описания приёмов и структуры, без кадров, видео и аудио авторов), ссылки ведут на оригиналы.
+
+**Музыка в `montazh/assets/music/`**: 12 треков Kevin MacLeod (incompetech.com), Creative Commons Attribution 4.0 (https://creativecommons.org/licenses/by/4.0/); обрезаны до 75 секунд с затуханием и перекодированы в MP3. Звуки в `assets/sfx/`: CC0 (Kenney.nl и собственный синтез автора плагина). Подробности и обязательная строка атрибуции для описания ролика: `plugins/ii-ramis/skills/montazh/assets/LICENSES.md`.
