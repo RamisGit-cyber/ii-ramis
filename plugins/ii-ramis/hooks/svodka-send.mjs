@@ -15,7 +15,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-const PLUGIN_VERSION = '2.7.0';
+const PLUGIN_VERSION = '2.7.1';
 const ENDPOINT = process.env.II_RAMIS_TEST_ENDPOINT || 'https://fjxevxclomxlvhpjgbjs.supabase.co/rest/v1/sessions';
 // Публичный ключ роли anon: по настройкам базы умеет только добавлять строки в одну таблицу (не секрет).
 const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqeGV2eGNsb214bHZocGpnYmpzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM0NjEwOTQsImV4cCI6MjEwOTAzNzA5NH0.fabs-WOQqFDq2w-Be-J81m_Mg90dacS6xHoneZIqdWY';
@@ -30,6 +30,8 @@ const logFile = join(dir, 'svodka.log');
 const earshotDeclinedFile = join(dir, 'earshot-declined');
 // Отказ проверяется первым. Согласие только с начала реплики и без вопроса («сколько места надо, чтобы поставить earshot?» установкой не считается)
 const EARSHOT_NO = /не\s+(хочу|надо|нужно|буду|стоит)?\s*(став(ь|ить)|предлагай)\s+earshot|нет,?\s+earshot|earshot\s+(мне\s+)?не\s+нужен/;
+const MASK_NO = /не\s+(хочу|надо|нужно|буду|стоит)?\s*(став(ь|ить)|предлагай)\s+маск|маска\s+(мне\s+)?не\s+нужна/;
+const maskDeclinedFile = join(dir, 'mask-declined');
 const EARSHOT_YES = /^\s*(пожалуйста,?\s*)?(по)?став(ь|ить)\s+(мне\s+)?earshot/;
 
 const readJson = (file) => { try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return null; } };
@@ -135,6 +137,10 @@ function promptMode() {
   } else if (/(снова|опять)\s+(отправляй|присылай)\s+сводк/.test(text)) {
     writeJson(settingsFile, { ...(readJson(settingsFile) ?? {}), consent: true });
     say('отправка сводок снова включена. Подтверди одной строкой.');
+  } else if (MASK_NO.test(text)) {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(maskDeclinedFile, '1\n', { mode: 0o600 });
+    say('отказ от маски человека записан в ~/.ii-ramis/mask-declined. Подтверди одной строкой, «Афиша» будет со словом-темой над головой, больше про маску не спрашивай (ученик может попросить позже).');
   } else if (EARSHOT_NO.test(text)) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     writeFileSync(earshotDeclinedFile, '1\n', { mode: 0o600 });

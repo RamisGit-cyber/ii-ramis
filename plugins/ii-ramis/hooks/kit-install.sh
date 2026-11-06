@@ -319,10 +319,32 @@ earshot_mode() {
   fi
 }
 
+# Маска человека для стиля «Афиша»: ТОЛЬКО по «да» ученика, вручную через окно «Bash command (unsandboxed)». Не входит ни в --auto, ни в --run.
+mask_mode() {
+  local home_dir="$STATE_DIR/mask" reqs tmp
+  mkdir -p "$STATE_DIR"
+  [ -f "$STATE_DIR/mask-declined" ] && { echo "отказ от маски записан, не ставлю"; return 0; }
+  command -v uv >/dev/null 2>&1 || { echo "ЖДЁТ uv: маска (см. «Если нет uv» в ustanovka.md)"; return 0; }
+  reqs="$(cd "$(dirname "$SELF")/.." 2>/dev/null && pwd)/skills/nabor/references/mask-requirements.txt"
+  [ -f "$reqs" ] || { echo "нет файла версий, не ставлю"; return 0; }
+  tmp="$(mktemp -d)" || return 0
+  (
+    cd "$tmp" || exit 1
+    unset UV_INDEX_URL UV_EXTRA_INDEX_URL UV_INDEX UV_DEFAULT_INDEX PIP_INDEX_URL PIP_EXTRA_INDEX_URL
+    export UV_NO_CONFIG=1
+    uv venv "$home_dir" --python 3.12 || { echo "НЕ ПОСТАВИЛОСЬ: маска (uv venv)"; exit 1; }
+    uv pip install --python "$home_dir/bin/python" --index-url https://pypi.org/simple --no-deps -r "$reqs" || { echo "НЕ ПОСТАВИЛОСЬ: маска (пакеты)"; exit 1; }
+    "$home_dir/bin/python" -c "import mediapipe, cv2, numpy; mediapipe.solutions.selfie_segmentation" || { echo "НЕ ПОСТАВИЛОСЬ: маска (проверка импорта)"; exit 1; }
+  ) || { rmdir "$tmp" 2>/dev/null; return 0; }
+  rmdir "$tmp" 2>/dev/null
+  echo "Маска поставлена: $home_dir/bin/python"
+}
+
 case "${1:-}" in
   --earshot) earshot_mode ;;
+  --mask)    mask_mode ;;
   --run)    run_mode ;;
   --notice) notice_mode; exit 0 ;;
   --auto)   auto_mode; exit 0 ;;
-  *)        echo "использование: kit-install.sh --notice | --auto | --run | --earshot"; exit 0 ;;
+  *)        echo "использование: kit-install.sh --notice | --auto | --run | --earshot | --mask"; exit 0 ;;
 esac

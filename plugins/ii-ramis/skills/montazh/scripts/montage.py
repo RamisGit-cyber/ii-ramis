@@ -78,7 +78,7 @@ def map_interval(start, end, segments):
     return cut_start, cut_end
 
 
-def build_ass(cards, style, windows, face):
+def build_ass(cards, style, windows, face, mask=False, layer="front"):
     size = int(number(style.get("size", 84), 30, 200, "style.size"))
     accent_size = int(size * 1.3)
     single = style.get("layout", "stack") == "single"  # "single": одна строка, акцентное слово цветом
@@ -107,7 +107,7 @@ def build_ass(cards, style, windows, face):
             for name, font, _ in layouts.AFISHA_STYLES
         )
         head = head.replace("\n[Events]", extra + "\n[Events]", 1)
-        return head + "\n".join(layouts.afisha_lines(cards, style, face, ass_time, hex_to_ass, clean_text)) + "\n"
+        return head + "\n".join(layouts.afisha_lines(cards, style, face, ass_time, hex_to_ass, clean_text, mask, layer)) + "\n"
     lines = []
     for card in cards:
         text = clean_text(card["text"])
@@ -277,7 +277,7 @@ def build(project, plan_path):
     os.makedirs(workdir, exist_ok=True)
     own_output(project, workdir)
     require_no_links(project, os.path.join(workdir, "fonts")) if os.path.isdir(os.path.join(workdir, "fonts")) else None
-    for name in ("base.mp4", "mix.wav", "final.mp4", "subs.ass", "fonts", "cut-plan.json"):
+    for name in ("base.mp4", "mix.wav", "final.mp4", "subs.ass", "subs-behind.ass", "fonts", "cut-plan.json"):
         own_output(project, os.path.join(workdir, name))  # не пишем по ссылкам, ведущим за пределы проекта
     source = media_file(project, plan["source"])
     duration = float(probe(source)["format"]["duration"])
@@ -288,14 +288,31 @@ def build(project, plan_path):
     base = build_base(project, plan, workdir, segments)
     cards = make_cards(plan, segments)
     windows = layouts.plan_splits(project, plan, map_interval, segments)
-    write_text(project, os.path.join(workdir, "subs.ass"), build_ass(cards, plan.get("style", {}), windows, plan.get("face")))
+    style_plan = plan.get("style", {})
+    # Маска человека (mask.mp4 рядом с base.mp4, её делает segment.py): слово-тема «Афиши» встаёт за человека
+    mask_file = os.path.join(workdir, "mask.mp4")
+    use_mask = style_plan.get("preset") == "afisha" and os.path.isfile(mask_file) and not windows
+    if style_plan.get("preset") == "afisha" and not use_mask:
+        print("Маски человека нет: слово-тема «Афиши» встанет над головой, а не за ней (маска: nabor/references/ustanovka.md, «Маска человека»).")
+    write_text(project, os.path.join(workdir, "subs.ass"), build_ass(cards, style_plan, windows, plan.get("face"), use_mask, "front"))
+    if use_mask:
+        write_text(project, os.path.join(workdir, "subs-behind.ass"), build_ass(cards, style_plan, windows, plan.get("face"), True, "behind"))
     copy_fonts(project, FONTS_SRC, os.path.join(workdir, "fonts"))
     mix = mix_audio(project, plan, workdir, base)
     loudness = loudnorm_filter(measure_loudness(mix))
     split_inputs, split_graph, last = layouts.split_graph(windows, "vs", 1)
     insert_inputs, graph, last = inserts_chain(project, plan, segments, last, split_inputs.count("-i") + 1)
     extra_inputs = split_inputs + insert_inputs
-    video_graph = ["[0:v]null[vs]"] + split_graph + graph + [f"[{last}]ass=filename=subs.ass:fontsdir=fonts[vout]"]
+    if use_mask:
+        mask_slot = extra_inputs.count("-i") + 1
+        extra_inputs = extra_inputs + ["-i", "mask.mp4"]
+        video_graph = ["[0:v]null[vs]"] + split_graph + graph + [
+            f"[{last}]ass=filename=subs-behind.ass:fontsdir=fonts[bg]",
+            f"[0:v][{mask_slot}:v]alphamerge[person]",
+            "[bg][person]overlay=format=auto[fg]",
+            "[fg]ass=filename=subs.ass:fontsdir=fonts[vout]"]
+    else:
+        video_graph = ["[0:v]null[vs]"] + split_graph + graph + [f"[{last}]ass=filename=subs.ass:fontsdir=fonts[vout]"]
     audio_slot = extra_inputs.count("-i") + 1
     final = os.path.join(workdir, "final.mp4")
     ffmpeg_ok(

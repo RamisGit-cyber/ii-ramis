@@ -313,6 +313,39 @@ if (((Get-Content "$HOME\.claude.json" -Raw | ConvertFrom-Json).mcpServers.PSObj
 
 Проверено на Linux, на чужом Mac и Windows не проверено. После установки нужна новая сессия.
 
+## Маска человека для стиля «Афиша» (предлагается один раз, ставится только по «да»)
+
+Нужна стилю «Афиша» в `montazh`, чтобы слово-тема стояло ЗА человеком. Выбран MediaPipe Selfie Segmentation 0.10.14 (Apache-2.0): самый лёгкий и надёжный вариант без видеокарты, модель лежит внутри пакета (скачивать её отдельно не нужно, интернет после установки не нужен), на обычном процессоре Mac и Windows, на сервере 15 секунд видео обрабатываются за ~17 секунд. Окружение ~350 МБ на диске и несколько минут загрузки; ключей и аккаунтов нет. Пакеты закреплены (`nabor/references/mask-requirements.txt`, ставятся с `--no-deps`, без jax; хеши не закреплены, это остаточный риск). Предложение и отказ: `nabor/SKILL.md`, раздел 8.
+
+Mac и Linux (нужен `uv`; через окно «Bash command (unsandboxed)», разрешать только эту команду):
+
+```bash
+bash "$(ls -d "$HOME"/.claude/plugins/cache/ii-ramis/ii-ramis/*/ | sort -V | tail -1)hooks/kit-install.sh" --mask
+```
+
+Скрипт ставит окружение в `~/.ii-ramis/mask` (Python 3.12) из пустой временной папки, без чужих настроек uv и pip, с индекса pypi.org, и проверяет импорт. Не работает, если есть отметка отказа `~/.ii-ramis/mask-declined`.
+
+Windows (PowerShell, нужен `uv`):
+
+```powershell
+if (Test-Path "$HOME\.ii-ramis\mask-declined") { 'Ученик отказался от маски, не ставлю'; return }
+$r = (Get-ChildItem "$HOME\.claude\plugins\cache\ii-ramis\ii-ramis\*\skills\nabor\references\mask-requirements.txt" | Sort-Object FullName | Select-Object -Last 1).FullName
+if (-not $r) { 'нет файла версий, не ставлю'; return }
+$tmp = Join-Path ([IO.Path]::GetTempPath()) ('mask-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory $tmp | Out-Null
+Push-Location $tmp
+$env:UV_NO_CONFIG = '1'
+foreach ($n in 'UV_INDEX_URL','UV_EXTRA_INDEX_URL','UV_INDEX','UV_DEFAULT_INDEX','PIP_INDEX_URL','PIP_EXTRA_INDEX_URL') { Remove-Item "Env:$n" -ErrorAction SilentlyContinue }
+$m = "$HOME\.ii-ramis\mask"
+uv venv $m --python 3.12
+uv pip install --python "$m\Scripts\python.exe" --index-url https://pypi.org/simple --no-deps -r $r
+& "$m\Scripts\python.exe" -c "import mediapipe, cv2, numpy; mediapipe.solutions.selfie_segmentation; print('Маска поставлена')"
+Pop-Location
+Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+```
+
+Проверено на Linux; на чужом Mac и Windows не проверено. Без маски стиль «Афиша» работает в запасном виде (слово-тема над головой).
+
 ## Если `claude` не найден в PATH
 
 Плагины (superpowers, humanizer) тогда ставятся через интерфейс: Claude Desktop, вкладка Code, кнопка «+» у поля ввода → Manage plugins → найти `superpowers` (маркетплейс `claude-plugins-official`) и Install; для humanizer сначала добавить маркетплейс `blader/humanizer`. Навыки через `npx` на `claude` не завязаны, а `claude mcp add` без него не выполнить: скажи честно.
