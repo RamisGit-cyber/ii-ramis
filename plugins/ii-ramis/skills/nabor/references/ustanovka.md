@@ -276,20 +276,31 @@ Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue
 "ошибок: $($script:Fails)"
 ```
 
-## Earshot по желанию (не ставится автоматически)
+## Earshot (предлагается один раз, ставится только по «да»)
 
-Earshot (github.com/Leonxlnx/earshot, MIT, v0.4.0 = коммит `591fa3e`) даёт Claude «уши»: описать звук словами, найти нужный момент в записи, подобрать эффекты. Для него нужны Python 3.10+, ~1,5 ГБ пакетов (torch и др.) и ещё ~1,1 ГБ моделей (CLAP и AST, скачиваются один раз с Hugging Face на закреплённых версиях), каждый вызов из консоли грузит модели 20–40 секунд, через MCP быстрее. Ключей и аккаунтов не нужно, всё считается на компьютере. Предлагай только если ученик просит работу со звуком, назови цену («около 3 ГБ места и 10–15 минут»), ставь после «да»:
+Earshot (github.com/Leonxlnx/earshot, MIT, v0.4.0 = коммит `591fa3e`) даёт Claude «уши»: описать звук словами, найти нужный момент в записи, подобрать эффекты. Нужны Python 3.10+, около 1,5 ГБ пакетов (torch и др.) и ещё ~1,1 ГБ моделей (CLAP и AST, скачиваются один раз с Hugging Face на закреплённых версиях): всего ~3 ГБ и минут 10 загрузки. Ключей и аккаунтов не нужно, всё считается на компьютере; через MCP быстро, из консоли каждый вызов грузит модели 20–40 секунд. Порядок предложения: `nabor/SKILL.md`, раздел 7.
+
+Mac и Linux (нужны `uv` и `git`; песочница не даёт писать в `~/.ii-ramis` и `~/.claude.json`, поэтому запускай через окно «Bash command (unsandboxed)», разрешать только эту команду):
 
 ```bash
-# Mac или Linux; нужен uv. Одно окружение в своей папке, без прав администратора
-uv venv ~/.ii-ramis/earshot --python 3.12
-uv pip install --python ~/.ii-ramis/earshot/bin/python "torch==2.14.1" --index-url https://download.pytorch.org/whl/cpu
-uv pip install --python ~/.ii-ramis/earshot/bin/python "git+https://github.com/Leonxlnx/earshot@591fa3e028032e6dce56620a20e932e35667e8d8" "mcp==2.3.0"
-~/.ii-ramis/earshot/bin/earshot doctor --fetch
-claude mcp add --scope user earshot -- ~/.ii-ramis/earshot/bin/python -m earshot mcp
+bash "$(ls -d "$HOME"/.claude/plugins/cache/ii-ramis/ii-ramis/*/ | sort -V | tail -1)hooks/kit-install.sh" --earshot
 ```
 
-На Windows пути `Scripts\python.exe` вместо `bin/python`. Проверка: `earshot doctor` без строки `problems`. Не проверено на чужом Mac и Windows (проверено на Linux). Запись `claude mcp add` в песочнице не пройдёт (раздел «Песочница»).
+Скрипт делает: окружение `~/.ii-ramis/earshot` (Python 3.12), `torch==2.14.1` с CPU-индекса PyTorch, пакет Earshot с GitHub на коммите `591fa3e` и `mcp==2.3.0`, `earshot doctor --fetch` (модели), `claude mcp add --scope user earshot`. Проверка: `~/.ii-ramis/earshot/bin/earshot doctor` без строки `problems`.
+
+Windows (PowerShell, нужен `uv`; песочницы нет):
+
+```powershell
+$e = "$HOME\.ii-ramis\earshot"
+uv venv $e --python 3.12
+uv pip install --python "$e\Scripts\python.exe" "torch==2.14.1" --index-url https://download.pytorch.org/whl/cpu
+uv pip install --python "$e\Scripts\python.exe" "git+https://github.com/Leonxlnx/earshot@591fa3e028032e6dce56620a20e932e35667e8d8" "mcp==2.3.0"
+& "$e\Scripts\earshot.exe" doctor --fetch
+claude mcp add --scope user earshot -- "$e\Scripts\python.exe" -m earshot mcp
+Remove-Item "$HOME\.ii-ramis\earshot-declined" -ErrorAction SilentlyContinue
+```
+
+Проверено на Linux, на чужом Mac и Windows не проверено. После установки нужна новая сессия.
 
 ## Если `claude` не найден в PATH
 

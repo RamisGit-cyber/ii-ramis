@@ -122,6 +122,10 @@ try {
   check(JSON.parse(readFileSync(join(talker, '.ii-ramis', 'nabor.json'), 'utf8')).status === 'declined', '«не ставь набор» должно записать status=declined');
   await prompt(talker, 'ладно, поставь набор');
   check(!existsSync(join(talker, '.ii-ramis', 'nabor.json')), '«поставь набор» снимает отказ');
+  await prompt(talker, 'не ставь Earshot, не надо');
+  check(existsSync(join(talker, '.ii-ramis', 'earshot-declined')), '«не ставь Earshot» записывает отметку отказа');
+  await prompt(talker, 'ну ладно, поставь Earshot');
+  check(!existsSync(join(talker, '.ii-ramis', 'earshot-declined')), '«поставь Earshot» снимает отметку');
   const plain = await prompt(newHome(), 'сделай мне сайт про кофейню');
   check(plain.out === '', 'обычный запрос хук не трогает');
   const notSet = newHome();

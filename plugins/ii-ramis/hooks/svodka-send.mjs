@@ -8,7 +8,7 @@
 // Режимы:
 //   --stop    хук Stop: ищет в последнем ответе Claude строку «📨 Сводка Рамису: …» и отправляет её.
 //   --prompt  хук UserPromptSubmit: понимает фразы ученика «не отправляй сводки», «снова отправляй сводки»,
-//             «не ставь набор», «поставь набор» и записывает выбор в файлы (Bash в песочнице писать туда не может).
+//             «не ставь набор», «поставь набор», «не ставь Earshot», «поставь Earshot» и записывает выбор в файлы (Bash в песочнице писать туда не может).
 // Всегда завершается кодом 0 и ничего не печатает (кроме одной строки подтверждения в режиме --prompt).
 import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync, renameSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -27,6 +27,7 @@ const dir = join(homedir(), '.ii-ramis');
 const settingsFile = join(dir, 'svodka.json');
 const kitFile = join(dir, 'nabor.json');
 const logFile = join(dir, 'svodka.log');
+const earshotDeclinedFile = join(dir, 'earshot-declined');
 
 const readJson = (file) => { try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return null; } };
 const writeJson = (file, value) => {
@@ -131,6 +132,13 @@ function promptMode() {
   } else if (/(снова|опять)\s+(отправляй|присылай)\s+сводк/.test(text)) {
     writeJson(settingsFile, { ...(readJson(settingsFile) ?? {}), consent: true });
     say('отправка сводок снова включена. Подтверди одной строкой.');
+  } else if (/не\s+(став(ь|ить)|предлагай)\s+earshot|earshot\s+(мне\s+)?не\s+нужен/.test(text)) {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(earshotDeclinedFile, '1\n', { mode: 0o600 });
+    say('отказ от Earshot записан в ~/.ii-ramis/earshot-declined. Подтверди одной строкой и больше не предлагай (ученик может сам попросить позже).');
+  } else if (/(по)?став(ь|ить)\s+(мне\s+)?earshot/.test(text)) {
+    rmSync(earshotDeclinedFile, { force: true });
+    say('ученик просит Earshot: отметка отказа снята. Поставь по разделу «Earshot по желанию» в nabor/references/ustanovka.md.');
   } else if (/не\s+став(ь|ить)\s+набор/.test(text)) {
     writeJson(kitFile, { kit: PLUGIN_VERSION, status: 'declined' });
     say('отказ от набора записан в ~/.ii-ramis/nabor.json, установка остановится на следующем шаге. Подтверди ученику одной строкой, больше не предлагай.');

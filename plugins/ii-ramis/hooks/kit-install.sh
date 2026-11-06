@@ -36,6 +36,8 @@ GSAP_SHA="aed9cfd3277740755f6bfc1155c7aa645403b760" # greensock/gsap-skills (MIT
 FFMPEG_SKILL_SHA="9bdb444fdd569bcf50276337b36164fadf54b363" # kajisho5/ffmpeg-skill (MIT), тег v3.2.0
 TEARDOWN_SHA="a91262ac1109051e014662d42ecb0b7bc1f113b1" # elvarofficial/teardown (MIT), коммит от 31.10.2026
 ANATOMY_SHA="1482e8469b0a9e0d8cc18ea2740a01423d29ae80" # wheresryan22/anatomy (MIT), коммит от 18.10.2026
+EARSHOT_SHA="591fa3e028032e6dce56620a20e932e35667e8d8" # Leonxlnx/earshot (MIT), тег v0.4.0; ставится только по «да» ученика (режим --earshot), не хуком
+PYTORCH_CPU_INDEX="https://download.pytorch.org/whl/cpu"
 GAMEDEV_SHA="19d93f97c9c1ea0f8b306e77aa81e0d3e352d3e9" # gamedev-skills/awesome-gamedev-agent-skills (Apache-2.0), коммит от 28.10.2026
 
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -282,9 +284,28 @@ run_mode() {
   echo "ошибок: $fails"
 }
 
+# Earshot («уши» для Claude): ТОЛЬКО по «да» ученика, вручную через окно «Bash command (unsandboxed)». Не входит ни в --auto, ни в --run.
+earshot_mode() {
+  local home_dir="$STATE_DIR/earshot" claude_bin
+  mkdir -p "$STATE_DIR"
+  command -v uv >/dev/null 2>&1 || { echo "ЖДЁТ uv: Earshot (см. «Если нет uv» в ustanovka.md)"; return 0; }
+  command -v git >/dev/null 2>&1 || { echo "нужен git"; return 0; }
+  claude_bin="$(find_claude)"
+  [ -x "$home_dir/bin/earshot" ] || {
+    uv venv "$home_dir" --python 3.12 || { echo "НЕ ПОСТАВИЛОСЬ: Earshot (uv venv)"; return 0; }
+    uv pip install --python "$home_dir/bin/python" "torch==2.14.1" --index-url "$PYTORCH_CPU_INDEX" || { echo "НЕ ПОСТАВИЛОСЬ: Earshot (torch)"; return 0; }
+    uv pip install --python "$home_dir/bin/python" "git+https://github.com/Leonxlnx/earshot@$EARSHOT_SHA" "mcp==2.3.0" || { echo "НЕ ПОСТАВИЛОСЬ: Earshot (пакет)"; return 0; }
+  }
+  "$home_dir/bin/earshot" doctor --fetch || { echo "НЕ ПОСТАВИЛОСЬ: Earshot (модели)"; return 0; }
+  if [ -n "$claude_bin" ]; then "$claude_bin" mcp add --scope user earshot -- "$home_dir/bin/python" -m earshot mcp || echo "MCP не подключился"; else echo "claude не найден: MCP подключить вручную"; fi
+  rm -f "$STATE_DIR/earshot-declined"
+  echo "Earshot поставлен: $home_dir"
+}
+
 case "${1:-}" in
+  --earshot) earshot_mode ;;
   --run)    run_mode ;;
   --notice) notice_mode; exit 0 ;;
   --auto)   auto_mode; exit 0 ;;
-  *)        echo "использование: kit-install.sh --notice | --auto | --run"; exit 0 ;;
+  *)        echo "использование: kit-install.sh --notice | --auto | --run | --earshot"; exit 0 ;;
 esac
