@@ -321,7 +321,7 @@ earshot_mode() {
 
 # Маска человека для стиля «Афиша»: ТОЛЬКО по «да» ученика, вручную через окно «Bash command (unsandboxed)». Не входит ни в --auto, ни в --run.
 mask_mode() {
-  local home_dir="$STATE_DIR/mask" reqs tmp
+  local home_dir="$STATE_DIR/mask" stage="$STATE_DIR/mask.new" reqs tmp v
   mkdir -p "$STATE_DIR"
   [ -f "$STATE_DIR/mask-declined" ] && { echo "отказ от маски записан, не ставлю"; return 0; }
   command -v uv >/dev/null 2>&1 || { echo "ЖДЁТ uv: маска (см. «Если нет uv» в ustanovka.md)"; return 0; }
@@ -330,14 +330,18 @@ mask_mode() {
   tmp="$(mktemp -d)" || return 0
   (
     cd "$tmp" || exit 1
-    unset UV_INDEX_URL UV_EXTRA_INDEX_URL UV_INDEX UV_DEFAULT_INDEX PIP_INDEX_URL PIP_EXTRA_INDEX_URL
+    # чужие настройки uv и pip (индексы, find-links, зеркала, ограничения) не подмешиваем
+    for v in $(compgen -e | grep -E '^(UV_|PIP_)'); do unset "$v"; done
     export UV_NO_CONFIG=1
-    uv venv "$home_dir" --python 3.12 || { echo "НЕ ПОСТАВИЛОСЬ: маска (uv venv)"; exit 1; }
-    uv pip install --python "$home_dir/bin/python" --index-url https://pypi.org/simple --no-deps -r "$reqs" || { echo "НЕ ПОСТАВИЛОСЬ: маска (пакеты)"; exit 1; }
-    "$home_dir/bin/python" -c "import mediapipe, cv2, numpy; mediapipe.solutions.selfie_segmentation" || { echo "НЕ ПОСТАВИЛОСЬ: маска (проверка импорта)"; exit 1; }
-  ) || { rmdir "$tmp" 2>/dev/null; return 0; }
+    # Ставим во временную папку и переносим только после успешной проверки: сломанная маска не сойдёт за готовую
+    [ -d "$stage" ] && { echo "остался недоделанный $stage: удали эту папку и запусти снова"; exit 1; }
+    uv venv "$stage" --python 3.12 --no-python-downloads || { echo "ЖДЁТ python 3.12: маска (uv не скачивает Python сам, поставь Python 3.12 и повтори)"; exit 1; }
+    uv pip install --python "$stage/bin/python" --index-url https://pypi.org/simple --no-deps --only-binary :all: -r "$reqs" || { echo "НЕ ПОСТАВИЛОСЬ: маска (пакеты, нужны готовые сборки)"; exit 1; }
+    "$stage/bin/python" -c "import mediapipe, cv2, numpy; mediapipe.solutions.selfie_segmentation" || { echo "НЕ ПОСТАВИЛОСЬ: маска (проверка импорта)"; exit 1; }
+  ) || { rmdir "$tmp" 2>/dev/null; echo "установка маски не завершена, папка $stage (если есть) недоделана"; return 0; }
   rmdir "$tmp" 2>/dev/null
-  echo "Маска поставлена: $home_dir/bin/python"
+  if [ -d "$home_dir" ]; then echo "маска уже была: $home_dir (новую сборку не переношу, удали старую папку для переустановки)"; return 0; fi
+  mv "$stage" "$home_dir" && echo "Маска поставлена: $home_dir/bin/python"
 }
 
 case "${1:-}" in

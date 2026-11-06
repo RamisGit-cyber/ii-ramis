@@ -291,7 +291,7 @@ def build(project, plan_path):
     style_plan = plan.get("style", {})
     # Маска человека (mask.mp4 рядом с base.mp4, её делает segment.py): слово-тема «Афиши» встаёт за человека
     mask_file = os.path.join(workdir, "mask.mp4")
-    use_mask = style_plan.get("preset") == "afisha" and os.path.isfile(mask_file) and not windows
+    use_mask = style_plan.get("preset") == "afisha" and os.path.isfile(mask_file) and not windows and not plan.get("inserts")
     if style_plan.get("preset") == "afisha" and not use_mask:
         print("Маски человека нет: слово-тема «Афиши» встанет над головой, а не за ней (маска: nabor/references/ustanovka.md, «Маска человека»).")
     write_text(project, os.path.join(workdir, "subs.ass"), build_ass(cards, style_plan, windows, plan.get("face"), use_mask, "front"))

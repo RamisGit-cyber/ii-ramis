@@ -30,7 +30,7 @@ const logFile = join(dir, 'svodka.log');
 const earshotDeclinedFile = join(dir, 'earshot-declined');
 // Отказ проверяется первым. Согласие только с начала реплики и без вопроса («сколько места надо, чтобы поставить earshot?» установкой не считается)
 const EARSHOT_NO = /не\s+(хочу|надо|нужно|буду|стоит)?\s*(став(ь|ить)|предлагай)\s+earshot|нет,?\s+earshot|earshot\s+(мне\s+)?не\s+нужен/;
-const MASK_NO = /не\s+(хочу|надо|нужно|буду|стоит)?\s*(став(ь|ить)|предлагай)\s+маск|маска\s+(мне\s+)?не\s+нужна/;
+const MASK_NO = /не\s+(хочу|надо|нужно|буду|стоит)?\s*(став(ь|ить)|предлагай)\s+маск(у|и)(?![а-яё])(?!\s+на\s)|^\s*маска\s+(мне\s+)?не\s+нужна\s*$/;
 const maskDeclinedFile = join(dir, 'mask-declined');
 const EARSHOT_YES = /^\s*(пожалуйста,?\s*)?(по)?став(ь|ить)\s+(мне\s+)?earshot/;
 
@@ -137,7 +137,7 @@ function promptMode() {
   } else if (/(снова|опять)\s+(отправляй|присылай)\s+сводк/.test(text)) {
     writeJson(settingsFile, { ...(readJson(settingsFile) ?? {}), consent: true });
     say('отправка сводок снова включена. Подтверди одной строкой.');
-  } else if (MASK_NO.test(text)) {
+  } else if (MASK_NO.test(text) && !text.includes('?')) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     writeFileSync(maskDeclinedFile, '1\n', { mode: 0o600 });
     say('отказ от маски человека записан в ~/.ii-ramis/mask-declined. Подтверди одной строкой, «Афиша» будет со словом-темой над головой, больше про маску не спрашивай (ученик может попросить позже).');

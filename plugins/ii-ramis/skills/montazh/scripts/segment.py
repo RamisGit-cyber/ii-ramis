@@ -21,6 +21,7 @@ def main():
     if len(sys.argv) != 4:
         sys.exit("Использование: segment.py <папка проекта> <видео внутри проекта> <маска.mp4 внутри проекта>")
     project, video_rel, mask_rel = sys.argv[1:4]
+    project = os.path.abspath(project)
     try:
         import cv2  # noqa: F401
         import mediapipe as mp
@@ -31,7 +32,8 @@ def main():
     common.need("ffmpeg")
     video = common.media_file(project, video_rel)
     mask_path = os.path.join(project, mask_rel)
-    if not common.inside(project, mask_path) or not mask_rel.startswith("_монтаж" + os.sep) and not mask_rel.startswith("_монтаж/"):
+    work_root = os.path.realpath(os.path.join(project, "_монтаж"))
+    if os.path.commonpath([work_root, os.path.realpath(mask_path)]) != work_root:
         sys.exit("Маска пишется только в _монтаж/ внутри проекта.")
     common.own_output(project, mask_path)
     duration = float(common.probe(video)["format"]["duration"])
@@ -60,7 +62,10 @@ def main():
             mask = segmenter.process(rgb).segmentation_mask  # 0..1 на размере кадра
             mask = np.clip((mask - 0.35) / 0.30, 0.0, 1.0)  # мягкий порог: уверенный человек = 1, фон = 0
             smooth = mask if smooth is None else 0.55 * mask + 0.45 * smooth  # меньше мерцания краёв
-            encode.stdin.write((smooth * 255).astype(np.uint8).tobytes())
+            try:
+                encode.stdin.write((smooth * 255).astype(np.uint8).tobytes())
+            except BrokenPipeError:
+                sys.exit("ffmpeg остановился при записи маски, проверь свободное место и ffmpeg.")
             frames += 1
     finally:
         segmenter.close()

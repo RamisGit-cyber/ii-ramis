@@ -16,5 +16,6 @@ packaging==26.3
 pillow==13.0.0
 protobuf==4.25.9
 pyparsing==3.3.3
-python-dateutil==4.0.0
+python-dateutil==2.9.0.post0
+six==1.17.0
 tzdata==2026.6

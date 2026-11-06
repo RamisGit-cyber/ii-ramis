@@ -82,7 +82,7 @@ check(/UV_NO_CONFIG=1/.test(kit) && /unset UV_INDEX_URL UV_EXTRA_INDEX_URL UV_IN
   const lines = existsSync(cons) ? readFileSync(cons, 'utf8').split('\n').filter((l) => l && !l.startsWith('#')) : [];
   check(lines.length > 50 && lines.every((l) => /^[A-Za-z0-9_.-]+==[0-9][\w.!+-]*$/.test(l)) && !lines.some((l) => /^torch==/i.test(l)), 'earshot-constraints.txt: только точные версии пакетов, torch не в списке');
 }
-check(/--mask\)\s+mask_mode/.test(kit) && /--no-deps -r "\$reqs"/.test(kit) && /UV_NO_CONFIG=1/.test(kit) && !/mask_mode/.test(kit.slice(kit.indexOf('run_mode()'), kit.indexOf('earshot_mode()'))), 'kit-install.sh: маска ставится только в режиме --mask, с --no-deps, из чистой папки');
+check(/--mask\)\s+mask_mode/.test(kit) && /--no-deps --only-binary :all: -r "\$reqs"/.test(kit) && /UV_NO_CONFIG=1/.test(kit) && !/mask_mode/.test(kit.slice(kit.indexOf('run_mode()'), kit.indexOf('earshot_mode()'))), 'kit-install.sh: маска ставится только в режиме --mask, с --no-deps, из чистой папки');
 {
   const req = join(plugin, 'skills', 'nabor', 'references', 'mask-requirements.txt');
   const lines = existsSync(req) ? readFileSync(req, 'utf8').split('\n').filter((l) => l && !l.startsWith('#')) : [];
