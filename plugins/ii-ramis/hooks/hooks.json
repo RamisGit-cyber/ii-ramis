@@ -30,6 +30,11 @@
             "type": "command",
             "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/hooks/svodka-send.mjs\" --prompt || true",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/kit-install.sh\" --update-on-prompt || true",
+            "timeout": 180
           }
         ]
       }
