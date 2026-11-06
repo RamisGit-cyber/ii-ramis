@@ -1,4 +1,4 @@
-// Проверка структуры плагина 2.5: манифест валиден, хуки только известные (памятка и установка набора), единственный файл кода hooks/kit-install.sh и он безопасен, у навыков есть frontmatter.
+// Проверка структуры плагина 2.6: манифест валиден, хуки только известные (памятка и установка набора), единственный файл кода hooks/kit-install.sh и он безопасен, у навыков есть frontmatter.
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,7 +26,7 @@ function readJson(file) {
 
 const manifest = readJson(join(plugin, '.claude-plugin', 'plugin.json'));
 check(manifest.name === 'ii-ramis', 'plugin.json: name должен быть ii-ramis');
-check(/^2\.5\.\d+$/.test(manifest.version ?? ''), 'plugin.json: version должен быть 2.5.x');
+check(/^2\.6\.\d+$/.test(manifest.version ?? ''), 'plugin.json: version должен быть 2.6.x');
 check(!('hooks' in manifest), 'plugin.json: не должно быть поля hooks');
 
 const marketplace = readJson(join(root, '.claude-plugin', 'marketplace.json'));
@@ -47,10 +47,11 @@ check(!JSON.stringify(hooks).includes('PreToolUse'), 'hooks.json: никаких
 check(!/svodka-send/.test(JSON.stringify(hooks.hooks?.SessionStart ?? [])) && JSON.stringify(hooks).split('command -v node').length === 3, 'hooks.json: Node нужен только хукам сводки и с проверкой, что он есть; установка набора от Node не зависит');
 check(JSON.stringify(hooks.hooks?.UserPromptSubmit ?? []).includes('reminder.txt'), 'hooks.json: UserPromptSubmit печатает reminder.txt');
 const reminder = readFileSync(join(plugin, 'hooks', 'reminder.txt'), 'utf8');
-check(reminder.includes('версия 2.5'), 'reminder.txt: версия должна совпадать с plugin.json');
+check(reminder.includes('версия 2.6'), 'reminder.txt: версия должна совпадать с plugin.json');
 check(!existsSync(join(plugin, 'scripts')), 'папки scripts быть не должно');
 const code = listFiles(plugin).filter((file) => ['.mjs', '.js', '.sh', '.ps1', '.py'].includes(extname(file)));
-check(code.sort().join(',') === [join(plugin, 'hooks', 'kit-install.sh'), join(plugin, 'hooks', 'svodka-send.mjs')].sort().join(','), `в плагине разрешены только hooks/kit-install.sh и hooks/svodka-send.mjs: ${code.join(', ')}`);
+const montazhScripts = ['common.py', 'transcribe.py', 'montage.py', 'critic.py'].map((name) => join(plugin, 'skills', 'montazh', 'scripts', name));
+check(code.sort().join(',') === [join(plugin, 'hooks', 'kit-install.sh'), join(plugin, 'hooks', 'svodka-send.mjs'), ...montazhScripts].sort().join(','), `в плагине разрешены только два хука и четыре скрипта навыка montazh/scripts: ${code.join(', ')}`);
 
 // Хук сводки: безопасность
 const sv = readFileSync(join(plugin, 'hooks', 'svodka-send.mjs'), 'utf8');
@@ -69,9 +70,12 @@ check(!/@latest|\bmain\b/.test(kitCode.replace(/\$\{[^}]*\}/g, '')), 'kit-instal
 check(/SKILLS_CLI="skills@1\.7\.6"/.test(kit) && /PLAYWRIGHT_MCP="@playwright\/mcp@0\.0\.84"/.test(kit) && /HYPERFRAMES_SHA="[0-9a-f]{40}"/.test(kit), 'kit-install.sh: закреплены skills, playwright, HyperFrames (коммит)');
 check(/REMOTION_SHA="[0-9a-f]{40}"/.test(kit), 'kit-install.sh: Remotion на закреплённом коммите');
 check(/releases\/download\/v1\.6\.1\/agent-reach\.zip/.test(kit) && /AR_SHA256="[0-9a-f]{64}"/.test(kit) && kit.includes('shasum -a 256'), 'kit-install.sh: Agent Reach по релизу и SHA-256');
-check([...kit.matchAll(/^\s*skill_pinned [\w./-]+ ([0-9a-f]{40}|"\$REMOTION_SHA"|"\$HYPERFRAMES_SHA") /gm)].length === 6, 'kit-install.sh: шесть наборов навыков должны ставиться из закреплённых коммитов');
+check([...kit.matchAll(/^\s*skill_pinned [\w./-]+ ([0-9a-f]{40}|"\$REMOTION_SHA"|"\$HYPERFRAMES_SHA"|"\$GSAP_SHA") /gm)].length === 7, 'kit-install.sh: семь наборов навыков (с GSAP) должны ставиться из закреплённых коммитов')
+check(/GSAP_SHA="[0-9a-f]{40}"/.test(kit) && /skill_pinned greensock\/gsap-skills "\$GSAP_SHA"/.test(kit), 'kit-install.sh: GSAP на закреплённом коммите');
 check(kit.includes('-type l') && kit.includes('символические ссылки'), 'kit-install.sh: клон чужого репозитория проверяется на символические ссылки');
-check(!/brew install|winget install|apt(-get)? install|\bsudo\b|curl[^\n]*\|\s*(ba)?sh|\beval\b/.test(kitCode), 'kit-install.sh: никаких brew/winget/sudo/curl|sh/eval');
+const kitBrew = [...kitCode.matchAll(/brew (install|upgrade) (\S+)/g)].map((m) => m[2]);
+check(kitBrew.every((name) => name === 'node' || name === 'ffmpeg') && kitBrew.length === 3, `kit-install.sh: brew только для node и ffmpeg (домашка урока 5), найдено: ${kitBrew.join(', ')}`);
+check(!/winget install|apt(-get)? install|\bsudo\b|curl[^\n]*\|\s*(ba)?sh|\beval\b/.test(kitCode), 'kit-install.sh: никаких winget/apt/sudo/curl|sh/eval');
 check(!/plugin marketplace add (?!anthropics\/claude-plugins-official)/.test(kitCode), 'kit-install.sh: можно добавлять только маркетплейс Anthropic');
 check([...kitCode.matchAll(/rm -rf ("[^"]*"(?: "[^"]*")*)/g)].every((m) => /^("\$LOCK"|"\$WORK" "\$LOCK")$/.test(m[1])), 'kit-install.sh: удалять можно только свой замок и свою временную папку');
 check(!/settings\.json|bypassPermissions|dangerously|allowUnsandboxed|sandbox\./i.test(kitCode), 'kit-install.sh: не трогает settings.json, разрешения и песочницу');
@@ -88,7 +92,7 @@ check(/--notice\)\s+notice_mode; exit 0/.test(kit) && /--auto\)\s+auto_mode; exi
 check(/status\)" = "declined"/.test(kit) && kit.includes('II_RAMIS_NO_KIT'), 'kit-install.sh: нет уважения к отказу (declined) и II_RAMIS_NO_KIT');
 check(/\[ "\$\(state_str status\)" = "declined" \] && return 0/.test(kit), 'kit-install.sh: declined нельзя затирать при записи состояния');
 
-for (const skill of ['ii-ramis', 'proverka', 'sait', 'nabor']) {
+for (const skill of ['ii-ramis', 'proverka', 'sait', 'nabor', 'montazh']) {
   const file = join(plugin, 'skills', skill, 'SKILL.md');
   check(existsSync(file), `нет ${skill}/SKILL.md`);
   if (!existsSync(file)) continue;
@@ -101,14 +105,14 @@ for (const skill of ['ii-ramis', 'proverka', 'sait', 'nabor']) {
 }
 
 const mainSkill = readFileSync(join(plugin, 'skills', 'ii-ramis', 'SKILL.md'), 'utf8');
-check(mainSkill.includes('ИИ Рамис на связи ✅ (версия 2.5)'), 'ii-ramis: нет приветствия версии 2.5');
+check(mainSkill.includes('ИИ Рамис на связи ✅ (версия 2.6)'), 'ii-ramis: нет приветствия версии 2.6');
 check(mainSkill.includes('🗣') && mainSkill.includes('🙋'), 'ii-ramis: нет блоков «Что случилось» / «Что сделать тебе»');
 
 const svodka = join(plugin, 'skills', 'ii-ramis', 'references', 'svodka.md');
 check(existsSync(svodka), 'нет references/svodka.md');
 if (existsSync(svodka)) {
   const text = readFileSync(svodka, 'utf8');
-  check(text.includes('plugin_version') && text.includes('2.5.0'), 'svodka.md: нет plugin_version 2.5.0');
+  check(text.includes('plugin_version') && text.includes('2.6.0'), 'svodka.md: нет plugin_version 2.6.0');
   check(!text.includes('Да/нет'), 'svodka.md: вопроса согласия быть не должно');
   check(text.includes('не отправляй сводки') && text.includes('consent: false'), 'svodka.md: нет правила отказа');
   check(!/curl -sS/.test(text) && text.includes('не запускай `curl`') && text.includes('📨 Сводка Рамису'), 'svodka.md: сводку отправляет хук, curl через Bash запрещён');
@@ -143,13 +147,14 @@ check(/c7cb2fdcacd134fb2ccb9b7a44f9ffa44e467271/.test(kit), 'Remotion: комм�
 const installBlocks = [...install.matchAll(/```(?:bash|powershell) install-(?:mac|win)\n([\s\S]*?)```/g)].map((m) => m[1]).join('\n');
 check(/install-mac\n[^`]*kit-install\.sh" --run/.test(install), 'ustanovka.md: install-mac должен запускать скрипт хука, а не дублировать его');
 check(install.includes('Песочница') && install.includes('защищённым путям') && install.includes('Bash command (unsandboxed)'), 'ustanovka.md: нет раздела про песочницу и официальное окно разрешения');
-check(!/brew install|winget install|apt(-get)? install/.test(installBlocks), 'install-блоки не должны сами ставить системные программы (brew/winget): только после слова ученику');
+const wingetIds = [...installBlocks.matchAll(/winget install --id (\S+)/g)].map((m) => m[1]);
+check(wingetIds.sort().join(',') === 'Gyan.FFmpeg,OpenJS.NodeJS.LTS' && !/brew install|apt(-get)? install/.test(installBlocks), `install-блоки: winget только для Node и ffmpeg (домашка урока 5): ${wingetIds.join(', ')}`);
 check(!/plugin marketplace add (?!anthropics\/claude-plugins-official)/.test(installBlocks), 'install-блоки: можно добавлять только маркетплейс Anthropic');
 check(/"status":"%s","tries":%s/.test(kit) && /"tries":/.test(installBlocks), 'установка: нет счётчика попыток в nabor.json');
 check(!/pip install agent-reach|uv tool install agent-reach/.test(naborText), 'nabor: нельзя ставить agent-reach из PyPI (чужой пакет)');
 check(!/impeccable@impeccable/.test(install), 'ustanovka.md: плагин impeccable с хуками ставить нельзя');
 check(!/\b(pdf|xlsx|pptx|docx|skill-creator)\b.*(--skill|plugin install)/.test(install), 'ustanovka.md: pdf/xlsx/pptx/docx/skill-creator не ставим');
-check(!/gsap|apple-design/.test(install), 'ustanovka.md: GSAP и apple-design ученики ставят сами');
+check(!/apple-design/.test(install) && install.includes('greensock/gsap-skills.git') && /aed9cfd3277740755f6bfc1155c7aa645403b760/.test(install), 'ustanovka.md: GSAP (закреплённый коммит) в блоке Windows, apple-design не ставим');
 check(!/settings\.json/.test(installBlocks), 'install-блоки не должны править settings.json');
 check(!/bypassPermissions|dangerously-skip|--dangerously/.test(install), 'ustanovka.md: никаких обходов разрешений');
 check(!/curl[^\n]*\|\s*(ba)?sh|irm[^\n]*\|\s*iex/.test(codeBlocks(naborText)), 'nabor: никаких установок через curl|sh и irm|iex');
@@ -172,8 +177,20 @@ check(naborSkill.includes('Operation not permitted') && /Не обходи/.test
 check(naborSkill.includes('installing') && naborSkill.includes('declined') && naborSkill.includes('partial'), 'nabor: нет разбора status installing/partial/declined');
 check(readFileSync(join(plugin, 'skills', 'ii-ramis', 'references', 'kurs-karta.md'), 'utf8').includes('Чек-лист наставника\nКаждый пункт проверяй блоком проверки'), 'kurs-karta.md: нет чек-листа урока 5');
 
+// Навык montazh: рамки безопасности и обязательный критик
+const montazhDir = join(plugin, 'skills', 'montazh');
+const montazhRefs = ['references/rabota.md', 'references/kritik.md', 'references/referensy.md', 'references/ustanovka.md', 'fonts/Onest-Regular.ttf', 'fonts/Onest-ExtraBold.ttf', 'fonts/OFL.txt'];
+for (const name of montazhRefs) check(existsSync(join(montazhDir, name)), `нет montazh/${name}`);
+const montazhSkill = readFileSync(join(montazhDir, 'SKILL.md'), 'utf8');
+check(/Критик \(обязательный/.test(montazhSkill) && montazhSkill.includes('references/kritik.md') && montazhSkill.includes('Ничего не публикуй'), 'montazh: нет обязательного критика или запрета публикации');
+check(!/\bheavy\b/.test(montazhSkill + readFileSync(join(montazhDir, 'references', 'rabota.md'), 'utf8')), 'montazh: слово heavy (у учеников его нет) упоминать нельзя');
+const montazhCode = montazhScripts.map((file) => (existsSync(file) ? readFileSync(file, 'utf8') : '')).join('\n');
+check(!/shutil\.rmtree|os\.remove|os\.unlink|\.unlink\(|rmdir|os\.system|shell=True|eval\(|exec\(|urllib|requests|socket|\.claude/.test(montazhCode), 'montazh/scripts: никаких удалений, shell=True, сети и обращений к ~/.claude (кроме faster-whisper в transcribe.py)'.replace('(кроме faster-whisper в transcribe.py)', ''));
+check(/def inside\(project, path\)/.test(montazhCode) && /commonpath/.test(montazhCode) && /project_path\(project, plan\["source"\]\)/.test(montazhCode), 'montazh/scripts: пути проверяются на выход за папку проекта');
+check(/faster-whisper==1\.2\.1/.test(montazhCode) && /revision=revision/.test(montazhCode) && /[0-9a-f]{40}/.test(montazhCode), 'montazh: расшифровка на закреплённой версии faster-whisper и модели');
+
 if (failures.length > 0) {
   console.error(failures.map((line) => `FAIL: ${line}`).join('\n'));
   process.exit(1);
 }
-console.log('OK: структура плагина 2.5 в порядке');
+console.log('OK: структура плагина 2.6 в порядке');

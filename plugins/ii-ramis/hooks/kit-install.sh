@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ИИ Рамис 2.5: установка набора курса (урок 5) скриптом хука SessionStart.
+# ИИ Рамис 2.6: установка набора курса (урок 5) скриптом хука SessionStart.
 #
 # Зачем скрипт, а не команды Claude: в Claude Desktop команды Claude идут в песочнице,
 # и она запрещает писать в ~/.claude (там навыки и плагины) и в ~/.claude.json (MCP).
@@ -17,7 +17,7 @@
 case "$(uname -s 2>/dev/null)" in Darwin|Linux) ;; *) exit 0 ;; esac
 umask 077
 
-KIT_VERSION="2.5.0"
+KIT_VERSION="2.6.0"
 STATE_DIR="$HOME/.ii-ramis"
 STATE="$STATE_DIR/nabor.json"
 LOCK="$STATE_DIR/nabor.lock"
@@ -32,6 +32,7 @@ HYPERFRAMES_SHA="1ff4cefd40c8dad98127fc78e8761c1ac62053dd" # тег v0.9.12 ре
 AR_URL="https://github.com/Panniantong/Agent-Reach/releases/download/v1.6.1/agent-reach.zip"
 AR_SHA256="51443d733bcb26064262442083a8f8abf6ba5e3e7df54beebafe98c88be04a60"
 REMOTION_SHA="c7cb2fdcacd134fb2ccb9b7a44f9ffa44e467271"
+GSAP_SHA="aed9cfd3277740755f6bfc1155c7aa645403b760" # greensock/gsap-skills (MIT), коммит от 06.11.2026
 
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 export DISABLE_TELEMETRY=1 DO_NOT_TRACK=1 HYPERFRAMES_NO_TELEMETRY=1 HYPERFRAMES_NO_UPDATE_CHECK=1
@@ -86,7 +87,7 @@ emit() { # сообщение ученику, контекст для Claude (о
 # Быстрый синхронный хук: только сообщает, что набор ставится. Ничего не устанавливает.
 notice_mode() {
   need_install || return 0
-  emit "ИИ Рамис ставит инструменты урока 5 в фоне (2–5 минут, вводить ничего не нужно). Не хочешь: напиши «не ставь набор»." "ИИ Рамис: хук ставит набор 2.5.0 в фоне вне песочницы. Скажи ученику одной строкой, что ставится и как отказаться (отказ «не ставь набор» запишет хук сам, файлы не пиши: установка остановится на следующем шаге). Саму установку Bash-командами не запускай: Bash в песочнице не может писать в ~/.claude."
+  emit "ИИ Рамис ставит инструменты урока 5 в фоне (2–5 минут, вводить ничего не нужно). Не хочешь: напиши «не ставь набор»." "ИИ Рамис: хук ставит набор 2.6.0 в фоне вне песочницы. Скажи ученику одной строкой, что ставится и как отказаться (отказ «не ставь набор» запишет хук сам, файлы не пиши: установка остановится на следующем шаге). Саму установку Bash-командами не запускай: Bash в песочнице не может писать в ~/.claude."
 }
 
 # Асинхронный хук (async: true): сам ставит набор, по завершении сообщает Claude на следующем ходу.
@@ -101,8 +102,8 @@ auto_mode() {
   local status missing notes
   status="$(state_str status)"; missing="$(clean "$(state_str missing)")"; notes="$(clean "$(state_str notes)")"
   case "$status" in
-    ok)      emit "Набор урока 5 поставлен. Закрой сессию и открой заново (или напиши /reload-plugins), тогда всё подхватится." "ИИ Рамис: установка набора 2.5.0 завершена, status ok. Заметки (notes): ${notes:-нет}. Скажи ученику перезапустить сессию; про notes объясни по разделу 1 навыка nabor." ;;
-    partial) emit "Часть набора не поставилась: ${missing:-см. журнал}. Скажи об этом ИИ Рамису." "ИИ Рамис: установка набора 2.5.0 не дошла до конца (status partial). Не поставилось: ${missing:-неизвестно}. Заметки: ${notes:-нет}. Разбери по разделу 1 навыка nabor, журнал ~/.ii-ramis/nabor.log." ;;
+    ok)      emit "Набор урока 5 поставлен. Закрой сессию и открой заново (или напиши /reload-plugins), тогда всё подхватится." "ИИ Рамис: установка набора 2.6.0 завершена, status ok. Заметки (notes): ${notes:-нет}. Скажи ученику перезапустить сессию; про notes объясни по разделу 1 навыка nabor." ;;
+    partial) emit "Часть набора не поставилась: ${missing:-см. журнал}. Скажи об этом ИИ Рамису." "ИИ Рамис: установка набора 2.6.0 не дошла до конца (status partial). Не поставилось: ${missing:-неизвестно}. Заметки: ${notes:-нет}. Разбери по разделу 1 навыка nabor, журнал ~/.ii-ramis/nabor.log." ;;
   esac
 }
 
@@ -145,6 +146,20 @@ run_mode() {
   has_mcp() { case " $(mcp_names) " in *" $1 "*) return 0;; esac; return 1; }
 
   # --- предварительные условия: говорим честно, остальное не ломаем ---
+  # Mac с Homebrew: Node и ffmpeg ставятся официальным brew (без вопросов, это домашка урока 5). Нет brew: честно пишем в notes.
+  node_fresh() { command -v node >/dev/null 2>&1 && node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=20)?0:1)' 2>/dev/null; }
+  if [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1 && ! declined; then
+    export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_ENV_HINTS=1
+    if ! node_fresh; then
+      : >"$log"
+      if command -v node >/dev/null 2>&1; then brew upgrade node >>"$log" 2>&1; else brew install node >>"$log" 2>&1; fi
+      node_fresh && echo "поставил: node" || echo "node не обновился (см. журнал)"
+    fi
+    if ! command -v ffmpeg >/dev/null 2>&1; then
+      : >"$log"; brew install ffmpeg >>"$log" 2>&1
+      command -v ffmpeg >/dev/null 2>&1 && echo "поставил: ffmpeg" || echo "ffmpeg не поставился (см. журнал)"
+    fi
+  fi
   local node_ok=0 git_ok=0
   if command -v node >/dev/null 2>&1 && node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=20)?0:1)' 2>/dev/null; then node_ok=1; else notes="$notes node"; fi
   command -v git >/dev/null 2>&1 && git_ok=1 || notes="$notes git"
@@ -161,7 +176,8 @@ run_mode() {
     : >"$log"
     if [ "$node_ok" -ne 1 ] || [ "$git_ok" -ne 1 ]; then fail "$marker" "нужны git и Node 22.20 или новее"; return; fi
     git -c protocol.file.allow=never clone -q --no-recurse-submodules "https://github.com/$repo.git" "$dir" >>"$log" 2>&1 && git -C "$dir" checkout -q "$sha" >>"$log" 2>&1 || { fail "$marker" "не скачалось"; return; }
-    if [ -n "$(find "$dir" -type l -not -path '*/.git/*' -not -path "$dir/packages/*" 2>/dev/null | head -1)" ]; then echo "в репозитории $repo есть символические ссылки, не ставлю" >>"$log"; fail "$marker" "символические ссылки"; return; fi
+    # В корне репозиториев авторов бывают CLAUDE.md и GEMINI.md как ссылки на AGENTS.md (так у greensock/gsap-skills): они безвредны, установщик их не копирует.
+    if [ -n "$(find "$dir" -type l -not -path '*/.git/*' -not -path "$dir/packages/*" -not \( -path "$dir/CLAUDE.md" -o -path "$dir/GEMINI.md" \) 2>/dev/null | head -1)" ] || { [ -L "$dir/CLAUDE.md" ] && [ "$(readlink "$dir/CLAUDE.md")" != "AGENTS.md" ]; } || { [ -L "$dir/GEMINI.md" ] && [ "$(readlink "$dir/GEMINI.md")" != "AGENTS.md" ]; }; then echo "в репозитории $repo есть символические ссылки, не ставлю" >>"$log"; fail "$marker" "символические ссылки"; return; fi
     npx --yes "$SKILLS_CLI" add "$dir" --skill "${skill_args[@]}" -g -a claude-code -y --copy >>"$log" 2>&1
     if has_skill "$marker"; then done_ "$marker"; else fail "$marker" "нужны git и Node 22.20 или новее"; fi
   }
@@ -172,6 +188,9 @@ run_mode() {
   skill_pinned blader/humanizer 0ef9fe5bc3572734fd3ae6c448fe00a30cd5dcf0 humanizer humanizer
   # Remotion: все навыки репозитория (remotion-best-practices маршрутизирует по остальным)
   skill_pinned remotion-dev/skills "$REMOTION_SHA" '*' remotion-best-practices
+
+  # GSAP: официальные навыки GreenSock (домашка урока 5), только gsap-*, на закреплённом коммите
+  skill_pinned greensock/gsap-skills "$GSAP_SHA" "gsap-core gsap-frameworks gsap-performance gsap-plugins gsap-react gsap-scrolltrigger gsap-timeline gsap-utils" gsap-core
 
   # --- HyperFrames: основной набор навыков HeyGen из клона на закреплённом коммите (тег v0.9.12), без их установщика ---
   skill_pinned heygen-com/hyperframes "$HYPERFRAMES_SHA" "hyperframes hyperframes-cli hyperframes-registry media-use" hyperframes
