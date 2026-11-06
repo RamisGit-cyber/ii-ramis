@@ -52,7 +52,7 @@ try {
   check(received.length === 1 && received[0].method === 'POST' && received[0].url === '/rest/v1/sessions', 'сводка должна уйти одним POST в sessions');
   const row = JSON.parse(received[0]?.body ?? '{}');
   check(row.student === 'Айдана' && row.lesson === 4 && row.stuck === true && row.errors === 2, `поля строки: ${received[0]?.body}`);
-  check(row.recap.startsWith('Собрали первую страницу') && row.summary?.plugin_version === '2.7.0' && row.summary?.text === row.recap, 'recap и summary должны совпадать, версия 2.7.0');
+  check(row.recap.startsWith('Собрали первую страницу') && row.summary?.plugin_version === '2.7.1' && row.summary?.text === row.recap, 'recap и summary должны совпадать, версия 2.7.0');
   check(!/Сводка Рамису|📨/.test(row.recap), 'служебный префикс в текст не попадает');
   check(Object.keys(row).sort().join(',') === 'errors,install_id,lesson,recap,stuck,student,summary', `лишние поля в строке: ${Object.keys(row)}`);
   check(JSON.parse(Buffer.from(received[0].headers.apikey.split('.')[1], 'base64url')).role === 'anon' && received[0].headers.prefer === 'return=minimal', 'ключ должен быть anon, Prefer: return=minimal');
@@ -137,6 +137,9 @@ try {
   rmSync(marker, { force: true });
   await prompt(talker, 'сколько места надо, чтобы поставить earshot?');
   check(!existsSync(marker), 'вопрос про место отказ не создаёт');
+  const maskMarker = join(talker, '.ii-ramis', 'mask-declined');
+  await prompt(talker, 'не ставь маску');
+  check(existsSync(maskMarker), '«не ставь маску» записывает отметку отказа');
   const plain = await prompt(newHome(), 'сделай мне сайт про кофейню');
   check(plain.out === '', 'обычный запрос хук не трогает');
   const notSet = newHome();

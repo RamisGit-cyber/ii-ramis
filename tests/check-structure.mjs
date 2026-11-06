@@ -50,8 +50,8 @@ const reminder = readFileSync(join(plugin, 'hooks', 'reminder.txt'), 'utf8');
 check(reminder.includes('версия 2.7'), 'reminder.txt: версия должна совпадать с plugin.json');
 check(!existsSync(join(plugin, 'scripts')), 'папки scripts быть не должно');
 const code = listFiles(plugin).filter((file) => ['.mjs', '.js', '.sh', '.ps1', '.py'].includes(extname(file)));
-const montazhScripts = ['common.py', 'transcribe.py', 'montage.py', 'critic.py', 'layouts.py'].map((name) => join(plugin, 'skills', 'montazh', 'scripts', name));
-check(code.sort().join(',') === [join(plugin, 'hooks', 'kit-install.sh'), join(plugin, 'hooks', 'svodka-send.mjs'), ...montazhScripts].sort().join(','), `в плагине разрешены только два хука и пять скриптов навыка montazh/scripts: ${code.join(', ')}`);
+const montazhScripts = ['common.py', 'transcribe.py', 'montage.py', 'critic.py', 'layouts.py', 'segment.py'].map((name) => join(plugin, 'skills', 'montazh', 'scripts', name));
+check(code.sort().join(',') === [join(plugin, 'hooks', 'kit-install.sh'), join(plugin, 'hooks', 'svodka-send.mjs'), ...montazhScripts].sort().join(','), `в плагине разрешены только два хука и шесть скриптов навыка montazh/scripts: ${code.join(', ')}`);
 
 // Хук сводки: безопасность
 const sv = readFileSync(join(plugin, 'hooks', 'svodka-send.mjs'), 'utf8');
@@ -82,6 +82,16 @@ check(/UV_NO_CONFIG=1/.test(kit) && /unset UV_INDEX_URL UV_EXTRA_INDEX_URL UV_IN
   const lines = existsSync(cons) ? readFileSync(cons, 'utf8').split('\n').filter((l) => l && !l.startsWith('#')) : [];
   check(lines.length > 50 && lines.every((l) => /^[A-Za-z0-9_.-]+==[0-9][\w.!+-]*$/.test(l)) && !lines.some((l) => /^torch==/i.test(l)), 'earshot-constraints.txt: только точные версии пакетов, torch не в списке');
 }
+check(/--mask\)\s+mask_mode/.test(kit) && /--no-deps --only-binary :all: -r "\$reqs"/.test(kit) && /UV_NO_CONFIG=1/.test(kit) && !/mask_mode/.test(kit.slice(kit.indexOf('run_mode()'), kit.indexOf('earshot_mode()'))), 'kit-install.sh: маска ставится только в режиме --mask, с --no-deps, из чистой папки');
+{
+  const req = join(plugin, 'skills', 'nabor', 'references', 'mask-requirements.txt');
+  const lines = existsSync(req) ? readFileSync(req, 'utf8').split('\n').filter((l) => l && !l.startsWith('#')) : [];
+  check(lines.some((l) => l === 'mediapipe==0.10.14') && !lines.some((l) => /^(jax|jaxlib)==/.test(l)) && lines.every((l) => /^[A-Za-z0-9_.-]+==[0-9][\w.!+-]*$/.test(l)), 'mask-requirements.txt: точные версии, mediapipe 0.10.14, без jax');
+  const fonts = join(plugin, 'skills', 'montazh', 'fonts');
+  check(['RubikMonoOne-Regular.ttf', 'Caveat-Regular.ttf', 'Oswald-Bold.ttf', 'Onest-Light.ttf'].every((f) => existsSync(join(fonts, f))), 'montazh/fonts: нет шрифтов стиля «Афиша»');
+  const ofl = readFileSync(join(fonts, 'OFL.txt'), 'utf8');
+  check(ofl.includes('RubikMonoOne-Regular.ttf') && ofl.includes('Caveat-Regular.ttf'), 'OFL.txt: нет строк про Rubik Mono One и Caveat');
+}
 check(/ffmpeg_has_subs\(\)/.test(kit) && /\(ass\|subtitles\)/.test(kit) && /brew install ffmpeg-full/.test(kit), 'kit-install.sh: ffmpeg проверяется на фильтр субтитров, без него ставится ffmpeg-full');
 check(kit.includes('-type l') && kit.includes('символические ссылки'), 'kit-install.sh: клон чужого репозитория проверяется на символические ссылки');
 const kitBrew = [...kitCode.matchAll(/brew (install|upgrade) (\S+)/g)].map((m) => m[2]);
@@ -91,7 +101,7 @@ check(!/plugin marketplace add (?!anthropics\/claude-plugins-official)/.test(kit
 check([...kitCode.matchAll(/rm -rf ("[^"]*"(?: "[^"]*")*)/g)].every((m) => /^("\$LOCK"|"\$WORK" "\$LOCK")$/.test(m[1])), 'kit-install.sh: удалять можно только свой замок и свою временную папку');
 check(!/settings\.json|bypassPermissions|dangerously|allowUnsandboxed|sandbox\./i.test(kitCode), 'kit-install.sh: не трогает settings.json, разрешения и песочницу');
 check(!/21st\.dev|mcp add[^\n]*21st|claude mcp get/.test(kitCode), 'kit-install.sh: 21st не ставится скриптом (только с ключом ученика) и ключ не читается');
-check(!/curl|wget|https?:\/\//.test(kitCode.replace(/--index-url https:\/\/pypi\.org\/simple/, '').replace(/PYTORCH_CPU_INDEX="[^"]*"/, '').replace(/"git\+https:\/\/github\.com\/Leonxlnx\/earshot@\$EARSHOT_SHA"/, '').replace(/AR_URL="[^"]*"/, '').replace(/git -c protocol\.file\.allow=never clone -q --no-recurse-submodules "https:\/\/github\.com\/\$repo\.git"/, '').replace(/"https:\/\/github\.com\/kajisho5\/ffmpeg-skill\.git"/, '').replace(/curl --proto =https --tlsv1\.2 -fsSL --max-time 120 -o "\$work\/ar\.zip" "\$AR_URL"/, '').replace(/NPM_CONFIG_REGISTRY="[^"]*"/, '').replace(/--registry https:\/\/registry\.npmjs\.org\//, '')), 'kit-install.sh: наружу ходит только скачивание Agent Reach, git clone с GitHub и npx с официального реестра');
+check(!/curl|wget|https?:\/\//.test(kitCode.replace(/--index-url https:\/\/pypi\.org\/simple/g, '').replace(/PYTORCH_CPU_INDEX="[^"]*"/, '').replace(/"git\+https:\/\/github\.com\/Leonxlnx\/earshot@\$EARSHOT_SHA"/, '').replace(/AR_URL="[^"]*"/, '').replace(/git -c protocol\.file\.allow=never clone -q --no-recurse-submodules "https:\/\/github\.com\/\$repo\.git"/, '').replace(/"https:\/\/github\.com\/kajisho5\/ffmpeg-skill\.git"/, '').replace(/curl --proto =https --tlsv1\.2 -fsSL --max-time 120 -o "\$work\/ar\.zip" "\$AR_URL"/, '').replace(/NPM_CONFIG_REGISTRY="[^"]*"/, '').replace(/--registry https:\/\/registry\.npmjs\.org\//, '')), 'kit-install.sh: наружу ходит только скачивание Agent Reach, git clone с GitHub и npx с официального реестра');
 check(/DO_NOT_TRACK=1/.test(kit) && /HYPERFRAMES_NO_TELEMETRY=1/.test(kit), 'kit-install.sh: статистика установщика навыков и HyperFrames выключена');
 check(!/npx[^\n]*hyperframes/.test(kitCode), 'kit-install.sh: CLI HyperFrames не запускается, навыки берутся из клона на коммите');
 check(/NPM_CONFIG_REGISTRY="https:\/\/registry\.npmjs\.org\/"/.test(kit) && /cd "\$WORK"/.test(kit), 'kit-install.sh: npx только с официального реестра и не из папки проекта');
@@ -123,7 +133,7 @@ const svodka = join(plugin, 'skills', 'ii-ramis', 'references', 'svodka.md');
 check(existsSync(svodka), 'нет references/svodka.md');
 if (existsSync(svodka)) {
   const text = readFileSync(svodka, 'utf8');
-  check(text.includes('plugin_version') && text.includes('2.7.0'), 'svodka.md: нет plugin_version 2.7.0');
+  check(text.includes('plugin_version') && text.includes('2.7.1'), 'svodka.md: нет plugin_version 2.7.0');
   check(!text.includes('Да/нет'), 'svodka.md: вопроса согласия быть не должно');
   check(text.includes('не отправляй сводки') && text.includes('consent: false'), 'svodka.md: нет правила отказа');
   check(!/curl -sS/.test(text) && text.includes('не запускай `curl`') && text.includes('📨 Сводка Рамису'), 'svodka.md: сводку отправляет хук, curl через Bash запрещён');

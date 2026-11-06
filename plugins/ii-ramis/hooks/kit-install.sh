@@ -319,10 +319,36 @@ earshot_mode() {
   fi
 }
 
+# Маска человека для стиля «Афиша»: ТОЛЬКО по «да» ученика, вручную через окно «Bash command (unsandboxed)». Не входит ни в --auto, ни в --run.
+mask_mode() {
+  local home_dir="$STATE_DIR/mask" stage="$STATE_DIR/mask.new" reqs tmp v
+  mkdir -p "$STATE_DIR"
+  [ -f "$STATE_DIR/mask-declined" ] && { echo "отказ от маски записан, не ставлю"; return 0; }
+  command -v uv >/dev/null 2>&1 || { echo "ЖДЁТ uv: маска (см. «Если нет uv» в ustanovka.md)"; return 0; }
+  reqs="$(cd "$(dirname "$SELF")/.." 2>/dev/null && pwd)/skills/nabor/references/mask-requirements.txt"
+  [ -f "$reqs" ] || { echo "нет файла версий, не ставлю"; return 0; }
+  tmp="$(mktemp -d)" || return 0
+  (
+    cd "$tmp" || exit 1
+    # чужие настройки uv и pip (индексы, find-links, зеркала, ограничения) не подмешиваем
+    for v in $(compgen -e | grep -E '^(UV_|PIP_)'); do unset "$v"; done
+    export UV_NO_CONFIG=1
+    # Ставим во временную папку и переносим только после успешной проверки: сломанная маска не сойдёт за готовую
+    [ -d "$stage" ] && { echo "остался недоделанный $stage: удали эту папку и запусти снова"; exit 1; }
+    uv venv "$stage" --python 3.12 --no-python-downloads || { echo "ЖДЁТ python 3.12: маска (uv не скачивает Python сам, поставь Python 3.12 и повтори)"; exit 1; }
+    uv pip install --python "$stage/bin/python" --index-url https://pypi.org/simple --no-deps --only-binary :all: -r "$reqs" || { echo "НЕ ПОСТАВИЛОСЬ: маска (пакеты, нужны готовые сборки)"; exit 1; }
+    "$stage/bin/python" -c "import mediapipe, cv2, numpy; mediapipe.solutions.selfie_segmentation" || { echo "НЕ ПОСТАВИЛОСЬ: маска (проверка импорта)"; exit 1; }
+  ) || { rmdir "$tmp" 2>/dev/null; echo "установка маски не завершена, папка $stage (если есть) недоделана"; return 0; }
+  rmdir "$tmp" 2>/dev/null
+  if [ -d "$home_dir" ]; then echo "маска уже была: $home_dir (новую сборку не переношу, удали старую папку для переустановки)"; return 0; fi
+  mv "$stage" "$home_dir" && echo "Маска поставлена: $home_dir/bin/python"
+}
+
 case "${1:-}" in
   --earshot) earshot_mode ;;
+  --mask)    mask_mode ;;
   --run)    run_mode ;;
   --notice) notice_mode; exit 0 ;;
   --auto)   auto_mode; exit 0 ;;
-  *)        echo "использование: kit-install.sh --notice | --auto | --run | --earshot"; exit 0 ;;
+  *)        echo "использование: kit-install.sh --notice | --auto | --run | --earshot | --mask"; exit 0 ;;
 esac
