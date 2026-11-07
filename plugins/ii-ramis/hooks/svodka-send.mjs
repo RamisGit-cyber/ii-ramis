@@ -97,11 +97,48 @@ async function post(row) {
   return 0;
 }
 
+// Пульс: тихая отметка «занимались» без текста работы. Только версия, урок, имя, время и kind.
+const MAX_PULSES_PER_DAY = 12;
+const sessionIdOf = (input) => (typeof input.session_id === 'string' ? input.session_id.replace(/[^\w-]/g, '').slice(0, 64) : '');
+
+async function pulseMode(input) {
+  const settings = readJson(settingsFile) ?? {};
+  if (settings.consent === false) return; // отказ ученика действует и на пульс
+  const now = Date.now();
+  const today = new Date(now).toISOString().slice(0, 10);
+  const session = sessionIdOf(input);
+  const pulsesToday = settings.pulse_day === today ? Number(settings.pulses_today ?? 0) : 0;
+  if (session && (session === settings.summary_session || session === settings.pulse_session)) return; // в этой сессии уже было
+  if (now - Date.parse(settings.last_sent ?? 0) < MIN_GAP_MS || now - Date.parse(settings.last_pulse ?? 0) < MIN_GAP_MS || pulsesToday >= MAX_PULSES_PER_DAY) return;
+
+  const installId = settings.install_id || randomUUID();
+  const lesson = Number.isInteger(settings.lesson) && settings.lesson > 0 ? settings.lesson : undefined;
+  const status = await post({
+    student: settings.name || 'без имени',
+    install_id: installId,
+    kind: 'pulse',
+    ...(lesson ? { lesson } : {}),
+    stuck: false,
+    summary: { plugin_version: PLUGIN_VERSION, kind: 'pulse', at: new Date(now).toISOString() },
+  });
+  log(status === 201 ? 'пульс отправлен' : 'пульс не отправлен');
+  writeJson(settingsFile, {
+    ...settings,
+    consent: settings.consent ?? true,
+    install_id: installId,
+    ...(status === 201 ? { last_pulse: new Date(now).toISOString(), pulse_day: today, pulses_today: pulsesToday + 1, ...(session ? { pulse_session: session } : {}) } : {}),
+  });
+}
+
 async function stopMode() {
   let input = {};
   try { input = JSON.parse(readStdin()); } catch { return; }
   const summary = parseSummary(input.last_assistant_message);
-  if (!summary) return;
+  if (!summary) {
+    // Строка сводки была, но отброшена (фильтр, короткая): пульс не шлём. Строки не было вовсе: тихий пульс.
+    if (!/📨\s*Сводка Рамису/u.test(String(input.last_assistant_message ?? ''))) await pulseMode(input);
+    return;
+  }
 
   const settings = readJson(settingsFile) ?? {};
   if (settings.consent === false) return; // отказ ученика
@@ -129,6 +166,8 @@ async function stopMode() {
     consent: settings.consent ?? true,
     install_id: installId,
     name,
+    ...(summary.lesson ? { lesson: summary.lesson } : {}),
+    ...(status === 201 && sessionIdOf(input) ? { summary_session: sessionIdOf(input) } : {}),
     ...(status === 201 ? { last_sent: new Date(now).toISOString(), last_text: summary.text, day: today, sent_today: sentToday + 1 } : {}),
   });
 }

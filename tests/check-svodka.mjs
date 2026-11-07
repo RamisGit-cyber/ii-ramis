@@ -63,10 +63,12 @@ try {
   await stop(home, good.replace('Собрали', 'Доделали'));
   check(received.length === 1, 'повторная сводка в течение 30 минут не должна уходить');
 
-  // 3. Нет строки сводки — ничего не уходит
+  // 3. Нет строки сводки и ученик отказался — ничего не уходит (пульс при отказе тоже молчит)
   const quiet = newHome();
+  mkdirSync(join(quiet, '.ii-ramis'));
+  writeFileSync(join(quiet, '.ii-ramis', 'svodka.json'), '{"consent":false}\n');
   await stop(quiet, 'Просто ответ без сводки.');
-  check(received.length === 1 && !existsSync(join(quiet, '.ii-ramis', 'svodka.json')), 'без строки «📨 Сводка Рамису» хук ничего не делает');
+  check(received.length === 1 && settings(quiet).consent === false && !('last_pulse' in settings(quiet)), 'при consent=false без строки сводки пульс не уходит');
 
   // 4. Согласие: consent=false — ничего не уходит
   const refuser = newHome();
@@ -167,6 +169,33 @@ try {
   await stop(newHome(), '> 📨 Сводка Рамису (урок 4): Это цитата из чужого файла и она не сводка.');
   check(received.length === beforeMarkup + 1, 'ключи с подчёркиваниями и цитаты в сводку не попадают');
 
+  // 6. Пульс: тихая отметка без текста
+  const stopWithSession = (home, message, sessionId) => run(home, '--stop', { hook_event_name: 'Stop', session_id: sessionId, last_assistant_message: message });
+  const pulseHome = newHome();
+  const pulseBase = received.length;
+  const pulseRun = await stopWithSession(pulseHome, 'Просто ответ без сводки.', 'sess-1');
+  check(pulseRun.code === 0 && pulseRun.out === '', 'пульс ничего не печатает ученику');
+  const pulseRow = received.length === pulseBase + 1 ? JSON.parse(received.at(-1).body) : null;
+  check(pulseRow?.kind === 'pulse' && pulseRow.stuck === false && /^[0-9a-f-]{36}$/.test(pulseRow.install_id) && pulseRow.summary?.plugin_version === '2.7.3', `пульс уходит без строки сводки: ${received.at(-1)?.body}`);
+  check(pulseRow && Object.keys(pulseRow).sort().join(',') === 'install_id,kind,stuck,student,summary' && Object.keys(pulseRow.summary).sort().join(',') === 'at,kind,plugin_version', `в пульсе только служебные поля: ${Object.keys(pulseRow ?? {})}`);
+  await stopWithSession(pulseHome, 'Ещё один ответ.', 'sess-2');
+  check(received.length === pulseBase + 1, 'второй пульс раньше чем через 30 минут не уходит');
+  const old = settings(pulseHome);
+  writeFileSync(join(pulseHome, '.ii-ramis', 'svodka.json'), JSON.stringify({ ...old, last_pulse: new Date(Date.now() - 31 * 60 * 1000).toISOString() }) + '\n');
+  await stopWithSession(pulseHome, 'Ещё один ответ.', 'sess-1');
+  check(received.length === pulseBase + 1, 'в той же сессии пульс не повторяется');
+  await stopWithSession(pulseHome, 'Ещё один ответ.', 'sess-3');
+  check(received.length === pulseBase + 2, 'через 30 минут пульс снова уходит');
+  // сводка в этой же сессии: пульс не дублирует
+  const both = newHome();
+  const bothBase = received.length;
+  await stopWithSession(both, good, 'sess-9');
+  await stopWithSession(both, 'Ответ без сводки.', 'sess-9');
+  check(received.length === bothBase + 1 && JSON.parse(received.at(-1).body).kind === undefined, 'после сводки в той же сессии пульс не дублируется');
+  // отброшенная сводка пульсом не заменяется
+  const rejectedBase = received.length;
+  await stopWithSession(newHome(), '📨 Сводка Рамису (урок 4): Положили ключ sk_live_51Hh8abcdEFGH12345678 в настройки.', 'sess-5');
+  check(received.length === rejectedBase, 'отброшенная сводка не превращается в пульс');
   denyProxy.close();
 } finally {
   server.close();
