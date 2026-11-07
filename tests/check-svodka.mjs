@@ -55,7 +55,7 @@ try {
   check(row.recap.startsWith('Собрали первую страницу') && row.summary?.plugin_version === '2.7.3' && row.summary?.text === row.recap, 'recap и summary должны совпадать, версия 2.7.0');
   check(!/Сводка Рамису|📨/.test(row.recap), 'служебный префикс в текст не попадает');
   check(Object.keys(row).sort().join(',') === 'errors,install_id,lesson,recap,stuck,student,summary', `лишние поля в строке: ${Object.keys(row)}`);
-  check(JSON.parse(Buffer.from(received[0].headers.apikey.split('.')[1], 'base64url')).role === 'anon' && received[0].headers.prefer === 'return=minimal', 'ключ должен быть anon, Prefer: return=minimal');
+  check(/^sb_publishable_[\w-]+$/.test(received[0].headers.apikey) && received[0].headers.authorization === undefined && received[0].headers.prefer === 'return=minimal', 'ключ sb_publishable_ только в apikey, без Authorization, Prefer: return=minimal');
   const saved = settings(home);
   check(saved.consent === true && /^[0-9a-f-]{36}$/.test(saved.install_id) && saved.name === 'Айдана' && saved.sent_today === 1, `svodka.json после отправки: ${JSON.stringify(saved)}`);
 
@@ -156,6 +156,17 @@ try {
   check(oldWay.stdout !== '201' && received.length === countBeforeSandbox, `эмуляция: curl через Bash в песочнице не должен дойти (получили ${oldWay.stdout})`);
   const viaHook = await stop(newHome(), good, sandboxEnv);
   check(viaHook.code === 0 && received.length === countBeforeSandbox + 1, 'тот же запрос через хук (вне песочницы, прокси песочницы к нему не относится) должен дойти');
+  // 2б. Разметка вокруг строки; ключи с подчёркиваниями и цитаты не проходят; Node.js не режется
+  const markup = newHome();
+  const beforeMarkup = received.length;
+  await stop(markup, '**📨 Сводка Рамису (урок 4, имя: Лада):** Поставили Node.js и запустили первую страницу сайта.**');
+  check(received.length === beforeMarkup + 1 && JSON.parse(received.at(-1).body).recap.startsWith('Поставили Node и запустили'), 'разметка вокруг строки сводки и Node.js должны проходить');
+  const leaky = newHome();
+  await stop(leaky, '📨 Сводка Рамису (урок 4): Положили ключ sk_live_51Hh8abcdEFGH12345678 в настройки сайта.');
+  await stop(newHome(), '📨 Сводка Рамису (урок 4): Токен a_b_c_d_e_f_g_h_i_j_k_l_m_n_o_p_q_r_s_t_u лежит в настройках.');
+  await stop(newHome(), '> 📨 Сводка Рамису (урок 4): Это цитата из чужого файла и она не сводка.');
+  check(received.length === beforeMarkup + 1, 'ключи с подчёркиваниями и цитаты в сводку не попадают');
+
   denyProxy.close();
 } finally {
   server.close();

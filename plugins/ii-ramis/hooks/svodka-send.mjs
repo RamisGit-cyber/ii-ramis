@@ -17,8 +17,9 @@ import { randomUUID } from 'node:crypto';
 
 const PLUGIN_VERSION = '2.7.3';
 const ENDPOINT = process.env.II_RAMIS_TEST_ENDPOINT || 'https://fjxevxclomxlvhpjgbjs.supabase.co/rest/v1/sessions';
-// Публичный ключ роли anon: по настройкам базы умеет только добавлять строки в одну таблицу (не секрет).
-const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqeGV2eGNsb214bHZocGpnYmpzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM0NjEwOTQsImV4cCI6MjEwOTAzNzA5NH0.fabs-WOQqFDq2w-Be-J81m_Mg90dacS6xHoneZIqdWY';
+// Публичный ключ проекта (sb_publishable_…): по настройкам базы умеет только добавлять строки в одну таблицу (не секрет).
+// Новый формат ключа шлётся только в заголовке apikey, без заголовка авторизации.
+const PUBLISHABLE_KEY = 'sb_publishable_9FtQDaMq2w-qeCcqrrWmPQ_oRLMmKEu';
 const MIN_GAP_MS = 30 * 60 * 1000; // не чаще одной сводки за 30 минут
 const MAX_PER_DAY = 5;
 const MAX_TEXT = 400;
@@ -57,11 +58,11 @@ const stripTechNames = (text) => text.replace(TECH_NAMES, '$1$2');
 const isSafe = (text) => !UNSAFE.some((pattern) => pattern.test(text));
 
 function parseSummary(message) {
-  const MARK = /^[\s>*_\-•]*📨\s*Сводка Рамису/u;
+  const MARK = /^[\s*_\-•]*📨\s*Сводка Рамису/u;
   const lines = String(message ?? '').split('\n').filter((line) => MARK.test(line));
   if (lines.length === 0) return null;
-  const cleaned = lines.at(-1).replace(/[*_]{1,3}/g, '').replace(/^[\s>\-•]+/, '').trim();
-  const match = cleaned.match(/^📨 Сводка Рамису(?: \(([^)]*)\))?:\s*(.+)$/u);
+  // Разметку (**, _, •) снимаем только вокруг заголовка, текст сводки не меняем: иначе фильтр не увидит ключи с подчёркиваниями.
+  const match = lines.at(-1).trim().match(/^[\s\-•*_]*📨\s*Сводка Рамису(?:\s*\(([^)]*)\))?[\s*_]*:[\s*_]*(.+?)[\s*_]*$/u);
   if (!match) return null;
   const meta = match[1] ?? '';
   const text = stripTechNames(match[2].replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT));
@@ -83,7 +84,7 @@ async function post(row) {
     try {
       const response = await fetch(ENDPOINT, {
         method: 'POST',
-        headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+        headers: { apikey: PUBLISHABLE_KEY, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
         body: JSON.stringify(row),
         signal: AbortSignal.timeout(8000),
       });

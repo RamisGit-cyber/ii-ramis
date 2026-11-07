@@ -59,7 +59,7 @@ const svUrls = (sv.match(/https?:\/\/[A-Za-z0-9.\/_-]+/g) ?? []).filter((url) =>
 check(svUrls.every((url) => url === 'https://fjxevxclomxlvhpjgbjs.supabase.co/rest/v1/sessions'), `svodka-send.mjs: наружу ходит только в таблицу sessions проекта Рамиса: ${svUrls.join(', ')}`);
 check(!/service_role|child_process|exec\(|spawn|eval\(/.test(sv), 'svodka-send.mjs: нет запуска команд, eval и service_role');
 check(/AbortSignal\.timeout\(8000\)/.test(sv) && /MIN_GAP_MS/.test(sv) && /MAX_PER_DAY/.test(sv) && /consent === false/.test(sv) && /UNSAFE/.test(sv), 'svodka-send.mjs: таймаут, лимиты, согласие и фильтр содержимого');
-check((sv.match(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g) ?? []).length === 1 && (sv.match(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g) ?? []).every((key) => JSON.parse(Buffer.from(key.split('.')[1], 'base64url')).role === 'anon'), 'svodka-send.mjs: один ключ, только anon');
+check(!/eyJ[\w-]{10,}/.test(sv) && (sv.match(/sb_publishable_[\w-]+/g) ?? []).length === 1 && !/sb_secret_|Authorization/.test(sv), 'svodka-send.mjs: один публичный ключ sb_publishable_, без JWT, секретных ключей и Authorization');
 
 // Скрипт установки набора: безопасность
 const kitFile = join(plugin, 'hooks', 'kit-install.sh');
