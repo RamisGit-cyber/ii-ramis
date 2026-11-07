@@ -18,7 +18,8 @@ import { randomUUID } from 'node:crypto';
 const PLUGIN_VERSION = '2.7.3';
 const REAL_ENDPOINT = 'https://fjxevxclomxlvhpjgbjs.supabase.co/rest/v1/sessions';
 // Подмена адреса только на локальный (для тестов): настройки чужого проекта не смогут увести данные на другой хост.
-const ENDPOINT = /^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(process.env.II_RAMIS_TEST_ENDPOINT ?? '') ? process.env.II_RAMIS_TEST_ENDPOINT : REAL_ENDPOINT;
+const localOverride = (value) => { try { const u = new URL(value); return u.protocol === 'http:' && !u.username && !u.password && (u.hostname === '127.0.0.1' || u.hostname === 'localhost') ? value : ''; } catch { return ''; } };
+const ENDPOINT = localOverride(process.env.II_RAMIS_TEST_ENDPOINT ?? '') || REAL_ENDPOINT;
 // Публичный ключ проекта (sb_publishable_…): по настройкам базы умеет только добавлять строки в одну таблицу (не секрет).
 // Новый формат ключа шлётся только в заголовке apikey, без заголовка авторизации.
 const PUBLISHABLE_KEY = 'sb_publishable_9FtQDaMq2w-qeCcqrrWmPQ_oRLMmKEu';
