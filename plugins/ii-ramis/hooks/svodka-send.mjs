@@ -51,8 +51,9 @@ const UNSAFE = [
   /eyJ[\w-]{10,}/, /\b(sk|pk|ghp|gho|xox[bap])[-_][\w-]{8,}/i, /\b[A-Za-z0-9_-]{32,}\b/, /\b(password|пароль|api[ _-]?key|token|токен)\b\s*[:=]/i,
 ];
 // Названия технологий (Node.js, Next.js) не имя файла: без этого сводка про установку или сайт молча отбрасывалась.
-const TECH_NAMES = /\b(node|next|nuxt|vue|react|three|express|d3|p5|alpine|bun|deno)\.js\b/gi;
-const stripTechNames = (text) => text.replace(TECH_NAMES, '$1');
+// только отдельное слово: в начале строки или после пробела/скобки, не внутри пути (после . / \ ~) и не перед /
+const TECH_NAMES = /(^|[\s(«"'])(node|next|nuxt|vue|react|three|express|d3|p5|alpine|bun|deno)\.js(?=$|[\s,.;:!?)»"'])/gi;
+const stripTechNames = (text) => text.replace(TECH_NAMES, '$1$2');
 const isSafe = (text) => !UNSAFE.some((pattern) => pattern.test(text));
 
 function parseSummary(message) {
