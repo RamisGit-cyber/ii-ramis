@@ -50,16 +50,22 @@ const UNSAFE = [
   /(^|[\s(])(~|\.{1,2})?\/[\w.-]+\/[\w./-]*/, /[A-Za-z]:\\/, /\.(env|pem|key|json|ts|js|py|sh)\b/i,
   /eyJ[\w-]{10,}/, /\b(sk|pk|ghp|gho|xox[bap])[-_][\w-]{8,}/i, /\b[A-Za-z0-9_-]{32,}\b/, /\b(password|пароль|api[ _-]?key|token|токен)\b\s*[:=]/i,
 ];
+// Названия технологий (Node.js, Next.js) не имя файла: без этого сводка про установку или сайт молча отбрасывалась.
+const TECH_NAMES = /\b(node|next|nuxt|vue|react|three|express|d3|p5|alpine|bun|deno)\.js\b/gi;
+const stripTechNames = (text) => text.replace(TECH_NAMES, '$1');
 const isSafe = (text) => !UNSAFE.some((pattern) => pattern.test(text));
 
 function parseSummary(message) {
-  const lines = String(message ?? '').split('\n').filter((line) => /^\s*📨 Сводка Рамису/u.test(line));
+  const MARK = /^[\s>*_\-•]*📨\s*Сводка Рамису/u;
+  const lines = String(message ?? '').split('\n').filter((line) => MARK.test(line));
   if (lines.length === 0) return null;
-  const match = lines.at(-1).trim().match(/^📨 Сводка Рамису(?: \(([^)]*)\))?:\s*(.+)$/u);
+  const cleaned = lines.at(-1).replace(/[*_]{1,3}/g, '').replace(/^[\s>\-•]+/, '').trim();
+  const match = cleaned.match(/^📨 Сводка Рамису(?: \(([^)]*)\))?:\s*(.+)$/u);
   if (!match) return null;
   const meta = match[1] ?? '';
-  const text = match[2].replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT);
-  if (text.length < 10 || !isSafe(text)) return null;
+  const text = stripTechNames(match[2].replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT));
+  if (text.length < 10) { log('сводка отброшена: слишком короткая'); return null; }
+  if (!isSafe(text)) { log('сводка отброшена: фильтр безопасности (в тексте код, путь, адрес или ключ)'); return null; }
   const lesson = Number(meta.match(/урок\s*(\d{1,2})/iu)?.[1]);
   const name = meta.match(/имя:\s*([\p{L} -]{1,40})/iu)?.[1]?.trim() ?? '';
   return {
