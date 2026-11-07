@@ -17,13 +17,14 @@ const check = (ok, message) => { if (!ok) failures.push(message); };
 
 const received = [];
 let respondWith = 201;
+let responseDelayMs = 0;
 const server = createServer((req, res) => {
   let body = '';
   req.on('data', (chunk) => { body += chunk; });
   req.on('end', () => {
     received.push({ method: req.method, url: req.url, headers: req.headers, body });
     res.statusCode = respondWith;
-    res.end();
+    setTimeout(() => res.end(), responseDelayMs);
   });
 });
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -41,7 +42,7 @@ const run = (home, mode, input, extraEnv = {}) => new Promise((resolve) => {
 });
 const stop = (home, message, env) => run(home, '--stop', { hook_event_name: 'Stop', last_assistant_message: message }, env);
 const prompt = (home, text) => run(home, '--prompt', { hook_event_name: 'UserPromptSubmit', prompt: text });
-const settings = (home) => JSON.parse(readFileSync(join(home, '.ii-ramis', 'svodka.json'), 'utf8'));
+const settings = (home) => { try { return JSON.parse(readFileSync(join(home, '.ii-ramis', 'svodka.json'), 'utf8')); } catch { return {}; } };
 const good = '🗣 Что случилось: сделали страницу.\n\n📨 Сводка Рамису (урок 4, застрял: да, ошибок: 2, имя: Айдана): Собрали первую страницу сайта и выложили её в интернет. Застряли на подключении базы, получилось со второго раза.';
 
 try {
@@ -57,7 +58,7 @@ try {
   check(Object.keys(row).sort().join(',') === 'errors,install_id,lesson,recap,stuck,student,summary', `лишние поля в строке: ${Object.keys(row)}`);
   check(/^sb_publishable_[\w-]+$/.test(received[0].headers.apikey) && received[0].headers.authorization === undefined && received[0].headers.prefer === 'return=minimal', 'ключ sb_publishable_ только в apikey, без Authorization, Prefer: return=minimal');
   const saved = settings(home);
-  check(saved.consent === true && /^[0-9a-f-]{36}$/.test(saved.install_id) && saved.name === 'Айдана' && saved.sent_today === 1, `svodka.json после отправки: ${JSON.stringify(saved)}`);
+  check(saved.consent === undefined && /^[0-9a-f-]{36}$/.test(saved.install_id) && saved.name === 'Айдана' && saved.sent_today === 1, `svodka.json после отправки: ${JSON.stringify(saved)}`);
 
   // 2. Лимит: вторая сводка сразу не уходит
   await stop(home, good.replace('Собрали', 'Доделали'));
@@ -196,6 +197,28 @@ try {
   const rejectedBase = received.length;
   await stopWithSession(newHome(), '📨 Сводка Рамису (урок 4): Положили ключ sk_live_51Hh8abcdEFGH12345678 в настройки.', 'sess-5');
   check(received.length === rejectedBase, 'отброшенная сводка не превращается в пульс');
+  // битый файл и согласие не булевым значением: не отправляем ни сводку, ни пульс
+  for (const [label, content] of [['битый файл', '{не json'], ['consent строкой', '{"consent":"false"}']]) {
+    const broken = newHome();
+    mkdirSync(join(broken, '.ii-ramis'));
+    writeFileSync(join(broken, '.ii-ramis', 'svodka.json'), content);
+    const brokenBase = received.length;
+    await stopWithSession(broken, good, 'sess-b');
+    await stopWithSession(broken, 'Ответ без сводки.', 'sess-c');
+    check(received.length === brokenBase, `${label}: ни сводка, ни пульс не уходят`);
+  }
+  // гонка: отказ, записанный за время отправки, не затирается ни пульсом, ни сводкой
+  for (const [label, message] of [['пульс', 'Ответ без сводки.'], ['сводка', good]]) {
+    const racing = newHome();
+    responseDelayMs = 600;
+    const pending = stopWithSession(racing, message, 'sess-r');
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    mkdirSync(join(racing, '.ii-ramis'), { recursive: true });
+    writeFileSync(join(racing, '.ii-ramis', 'svodka.json'), '{"consent":false}\n');
+    await pending;
+    responseDelayMs = 0;
+    check(JSON.stringify(settings(racing)) === '{"consent":false}', `${label}: отказ, записанный во время отправки, должен сохраниться: ${JSON.stringify(settings(racing))}`);
+  }
   denyProxy.close();
 } finally {
   server.close();

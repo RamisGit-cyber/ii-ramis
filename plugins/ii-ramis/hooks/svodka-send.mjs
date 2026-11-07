@@ -16,7 +16,9 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 const PLUGIN_VERSION = '2.7.3';
-const ENDPOINT = process.env.II_RAMIS_TEST_ENDPOINT || 'https://fjxevxclomxlvhpjgbjs.supabase.co/rest/v1/sessions';
+const REAL_ENDPOINT = 'https://fjxevxclomxlvhpjgbjs.supabase.co/rest/v1/sessions';
+// Подмена адреса только на локальный (для тестов): настройки чужого проекта не смогут увести данные на другой хост.
+const ENDPOINT = /^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(process.env.II_RAMIS_TEST_ENDPOINT ?? '') ? process.env.II_RAMIS_TEST_ENDPOINT : REAL_ENDPOINT;
 // Публичный ключ проекта (sb_publishable_…): по настройкам базы умеет только добавлять строки в одну таблицу (не секрет).
 // Новый формат ключа шлётся только в заголовке apikey, без заголовка авторизации.
 const PUBLISHABLE_KEY = 'sb_publishable_9FtQDaMq2w-qeCcqrrWmPQ_oRLMmKEu';
@@ -43,6 +45,22 @@ const writeJson = (file, value) => {
   renameSync(tmp, file);
 };
 const log = (line) => { try { mkdirSync(dir, { recursive: true, mode: 0o700 }); appendFileSync(logFile, `${new Date().toISOString()} ${line}\n`, { mode: 0o600 }); } catch { /* журнал не обязателен */ } };
+// Состояние отправки. Битый файл или согласие не в виде true/false считаем отказом: молча включать отправку нельзя.
+function loadSettings() {
+  if (!existsSync(settingsFile)) return {};
+  const value = readJson(settingsFile);
+  if (value === null || typeof value !== 'object') return null;
+  if (value.consent !== undefined && typeof value.consent !== 'boolean') return null;
+  return value;
+}
+// Запись после успешной отправки: файл читается заново и меняются только свои ключи. Поле consent отсюда не пишется никогда
+// (его меняет только режим согласия в promptMode), поэтому отказ, записанный за время отправки, не затирается.
+function saveSettings(patch) {
+  const current = loadSettings();
+  if (current === null || current.consent === false) return;
+  const { consent: _ignored, ...safePatch } = patch;
+  writeJson(settingsFile, { ...current, ...safePatch });
+}
 const readStdin = () => { try { return readFileSync(0, 'utf8'); } catch { return ''; } };
 
 // Что нельзя отправлять: код, пути, ключи, адреса, почту. Сомневаемся — не отправляем вовсе.
@@ -102,8 +120,8 @@ const MAX_PULSES_PER_DAY = 12;
 const sessionIdOf = (input) => (typeof input.session_id === 'string' ? input.session_id.replace(/[^\w-]/g, '').slice(0, 64) : '');
 
 async function pulseMode(input) {
-  const settings = readJson(settingsFile) ?? {};
-  if (settings.consent === false) return; // отказ ученика действует и на пульс
+  const settings = loadSettings();
+  if (!settings || settings.consent === false) return; // отказ ученика действует и на пульс
   const now = Date.now();
   const today = new Date(now).toISOString().slice(0, 10);
   const session = sessionIdOf(input);
@@ -122,12 +140,9 @@ async function pulseMode(input) {
     summary: { plugin_version: PLUGIN_VERSION, kind: 'pulse', at: new Date(now).toISOString() },
   });
   log(status === 201 ? 'пульс отправлен' : 'пульс не отправлен');
-  writeJson(settingsFile, {
-    ...settings,
-    consent: settings.consent ?? true,
-    install_id: installId,
-    ...(status === 201 ? { last_pulse: new Date(now).toISOString(), pulse_day: today, pulses_today: pulsesToday + 1, ...(session ? { pulse_session: session } : {}) } : {}),
-  });
+  if (status === 201) {
+    saveSettings({ install_id: installId, last_pulse: new Date(now).toISOString(), pulse_day: today, pulses_today: pulsesToday + 1, ...(session ? { pulse_session: session } : {}) });
+  }
 }
 
 async function stopMode() {
@@ -140,8 +155,8 @@ async function stopMode() {
     return;
   }
 
-  const settings = readJson(settingsFile) ?? {};
-  if (settings.consent === false) return; // отказ ученика
+  const settings = loadSettings();
+  if (!settings || settings.consent === false) return; // отказ ученика или непонятный файл
   const now = Date.now();
   const today = new Date(now).toISOString().slice(0, 10);
   const sentToday = settings.day === today ? Number(settings.sent_today ?? 0) : 0;
@@ -161,15 +176,15 @@ async function stopMode() {
   };
   const status = await post(row);
   log(status === 201 ? 'отправлено' : 'не отправлено');
-  writeJson(settingsFile, {
-    ...settings,
-    consent: settings.consent ?? true,
-    install_id: installId,
-    name,
-    ...(summary.lesson ? { lesson: summary.lesson } : {}),
-    ...(status === 201 && sessionIdOf(input) ? { summary_session: sessionIdOf(input) } : {}),
-    ...(status === 201 ? { last_sent: new Date(now).toISOString(), last_text: summary.text, day: today, sent_today: sentToday + 1 } : {}),
-  });
+  if (status === 201) {
+    saveSettings({
+      install_id: installId,
+      name,
+      ...(summary.lesson ? { lesson: summary.lesson } : {}),
+      ...(sessionIdOf(input) ? { summary_session: sessionIdOf(input) } : {}),
+      last_sent: new Date(now).toISOString(), last_text: summary.text, day: today, sent_today: sentToday + 1,
+    });
+  }
 }
 
 function promptMode() {
