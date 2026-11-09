@@ -32,6 +32,7 @@ case "$1 $2" in
 esac`);
 // поддельный npx: установщик ECC добавляет плагин (если не задано HARNESS_FAIL_GUIDED), skills add создаёт навык
 sh('npx', `echo "npx $*" >> "${calls}"
+echo "npmcfg $NPM_CONFIG_USERCONFIG|$NPM_CONFIG_GLOBALCONFIG" >> "${calls}"
 case "$*" in
   *ecc-universal*) [ -n "$HARNESS_FAIL_GUIDED" ] || node -e 'const fs=require("fs");const f=process.argv[1];const l=JSON.parse(fs.readFileSync(f,"utf8"));l.push({id:"ecc@ecc",version:"2.2.3",enabled:true});fs.writeFileSync(f,JSON.stringify(l))' "${state}" ;;
   *"skills@1.7.6 add"*) mkdir -p "$HOME/.claude/skills/security-audit" && echo "---" > "$HOME/.claude/skills/security-audit/SKILL.md" ;;
@@ -66,6 +67,8 @@ try {
   check(log().includes('npx --yes ecc-universal@2.2.3 install --guided --harness claude --claude-scope user --claude-hooks standard --yes'), `ECC: команда установщика: ${log()}`);
   check(/ПОЛНОГО перезапуска/.test(ecc.stdout) && /во внешнюю модель/.test(ecc.stdout), 'ECC: просьба перезапустить и честное слово про внешнюю модель');
   check(!/superpowers|security-audit/.test(log()), 'ECC: больше ничего не ставится');
+  const cfg = (log().match(/npmcfg (.*)\|(.*)/) ?? []);
+  check(cfg[1] === '/dev/null' && cfg[2] && cfg[2] !== '/dev/null' && cfg[1] !== cfg[2], `npm: пользовательский и системный конфиги пустые и разные (иначе npm падает): ${cfg[0]}`);
 
   // 3. повтор ничего не ставит
   reset();

@@ -57,6 +57,14 @@ try {
   }
   const plugins = spawnSync('claude', ['plugin', 'list', '--json'], { env: envFor(home), encoding: 'utf8' }).stdout;
   check(plugins.includes('"id": "superpowers@claude-plugins-official"'), 'плагин superpowers не установлен');
+  // Решение Рамиса 09.11: ECC (Standard), Superpowers и аудит Cloudflare встают сами, без фраз ученика; Strix не ставится никогда
+  const eccEntry = JSON.parse(plugins).find((p) => p.id === 'ecc@ecc');
+  check(eccEntry && eccEntry.enabled !== false, 'ECC (ecc@ecc) должен встать и быть включён автоматически, без фразы ученика');
+  check(JSON.parse(plugins).find((p) => p.id === 'superpowers@claude-plugins-official')?.enabled !== false, 'superpowers должен быть включён');
+  check(hasSkill(home, 'security-audit'), 'навык Cloudflare security-audit должен встать автоматически');
+  check(/"hook_profile": "standard"/.test(readFileSync(join(home, '.claude', 'settings.json'), 'utf8')), 'ECC: режим хуков должен быть standard');
+  check(/ECC/.test(firstJson.hookSpecificOutput?.additionalContext ?? '') && /Standard/.test(firstJson.hookSpecificOutput?.additionalContext ?? '') && existsSync(join(home, '.ii-ramis', 'ecc-warned')), 'после установки ECC Claude получает просьбу один раз предупредить про Standard');
+  check(!existsSync(join(home, '.local', 'bin', 'strix')) && !/strix/i.test(readFileSync(join(home, '.ii-ramis', 'nabor.log'), 'utf8')) && !/strix/i.test(plugins), 'Strix автоматически не ставится');
   check(!plugins.includes('"id": "humanizer@humanizer"') && !plugins.includes('"id": "impeccable@'), 'нельзя ставить плагины humanizer@humanizer и impeccable@ (чужие хуки)');
   const config = JSON.parse(readFileSync(join(home, '.claude.json'), 'utf8'));
   const pw = config.mcpServers?.playwright ?? {};
