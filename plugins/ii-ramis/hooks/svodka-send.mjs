@@ -15,7 +15,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-const PLUGIN_VERSION = '2.7.2';
+const PLUGIN_VERSION = '2.8.0';
 const ENDPOINT = process.env.II_RAMIS_TEST_ENDPOINT || 'https://fjxevxclomxlvhpjgbjs.supabase.co/rest/v1/sessions';
 // Публичный ключ роли anon: по настройкам базы умеет только добавлять строки в одну таблицу (не секрет).
 const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqeGV2eGNsb214bHZocGpnYmpzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM0NjEwOTQsImV4cCI6MjEwOTAzNzA5NH0.fabs-WOQqFDq2w-Be-J81m_Mg90dacS6xHoneZIqdWY';

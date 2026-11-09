@@ -321,9 +321,18 @@ earshot_mode() {
 
 # Маска человека для стиля «Афиша»: ТОЛЬКО по «да» ученика, вручную через окно «Bash command (unsandboxed)». Не входит ни в --auto, ни в --run.
 mask_mode() {
-  local home_dir="$STATE_DIR/mask" stage="$STATE_DIR/mask.new" reqs tmp v
+  local home_dir="$STATE_DIR/mask" stage="$STATE_DIR/mask.new" reqs tmp v rvm_script
   mkdir -p "$STATE_DIR"
   [ -f "$STATE_DIR/mask-declined" ] && { echo "отказ от маски записан, не ставлю"; return 0; }
+  rvm_script="$(cd "$(dirname "$SELF")/.." 2>/dev/null && pwd)/skills/montazh/scripts/install_rvm.py"
+  if [ -d "$home_dir" ]; then
+    if "$home_dir/bin/python" -c "import onnxruntime" 2>/dev/null; then
+      "$home_dir/bin/python" "$rvm_script" || echo "НЕ ПОСТАВИЛОСЬ: модель маски (скачивание или проверка суммы), повтори"
+    else
+      echo "маска уже была: $home_dir, но это старое окружение (MediaPipe, плагин до 2.8): Афиша считает грубее. Для новой маски удали папку $home_dir и запусти установку снова"
+    fi
+    return 0
+  fi
   command -v uv >/dev/null 2>&1 || { echo "ЖДЁТ uv: маска (см. «Если нет uv» в ustanovka.md)"; return 0; }
   reqs="$(cd "$(dirname "$SELF")/.." 2>/dev/null && pwd)/skills/nabor/references/mask-requirements.txt"
   [ -f "$reqs" ] || { echo "нет файла версий, не ставлю"; return 0; }
@@ -337,11 +346,16 @@ mask_mode() {
     [ -d "$stage" ] && { echo "остался недоделанный $stage: удали эту папку и запусти снова"; exit 1; }
     uv venv "$stage" --python 3.12 --no-python-downloads || { echo "ЖДЁТ python 3.12: маска (uv не скачивает Python сам, поставь Python 3.12 и повтори)"; exit 1; }
     uv pip install --python "$stage/bin/python" --index-url https://pypi.org/simple --no-deps --only-binary :all: -r "$reqs" || { echo "НЕ ПОСТАВИЛОСЬ: маска (пакеты, нужны готовые сборки)"; exit 1; }
-    "$stage/bin/python" -c "import mediapipe, cv2, numpy; mediapipe.solutions.selfie_segmentation" || { echo "НЕ ПОСТАВИЛОСЬ: маска (проверка импорта)"; exit 1; }
+    "$stage/bin/python" -c "import onnxruntime, numpy; onnxruntime.InferenceSession" || { echo "НЕ ПОСТАВИЛОСЬ: маска (проверка импорта)"; exit 1; }
   ) || { rmdir "$tmp" 2>/dev/null; echo "установка маски не завершена, папка $stage (если есть) недоделана"; return 0; }
   rmdir "$tmp" 2>/dev/null
-  if [ -d "$home_dir" ]; then echo "маска уже была: $home_dir (новую сборку не переношу, удали старую папку для переустановки)"; return 0; fi
-  mv "$stage" "$home_dir" && echo "Маска поставлена: $home_dir/bin/python"
+  mv "$stage" "$home_dir" || return 0
+  # Модель RVM (GPL-3.0, не входит в плагин): официальный релиз авторов, закреплённая версия, сверка SHA256
+  if "$home_dir/bin/python" "$rvm_script"; then
+    echo "Маска поставлена: $home_dir/bin/python"
+  else
+    echo "НЕ ПОСТАВИЛОСЬ: модель маски (скачивание или проверка суммы); окружение стоит, повтори установку маски"
+  fi
 }
 
 # Обновление плагина по фразе ученика («обнови плагин ИИ Рамис», «обнови плагин», «обновись»). Запускается хуком UserPromptSubmit

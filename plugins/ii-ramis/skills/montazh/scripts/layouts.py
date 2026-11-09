@@ -89,15 +89,16 @@ def card_pieces(windows, card, bottom):
 
 
 def afisha_lines(cards, style, face, ass_time, hex_to_ass, clean_text, mask=False, layer="front"):
-    """Таблички «Афиши». Слои одной таблички:
-    theme: огромное тонкое светлое слово-тема. С маской человека (mask=True) оно стоит ЗА человеком: голова перекрывает буквы
-           (слой "behind"). Без маски слово честно ставится над головой (слой "front", запасной вариант).
-    main: узкое жирное главное слово перед человеком, надстрочник over (широкий мелкий) и слово-акцент hand (рукописное)."""
+    """Запасной путь «Афиши» (когда нет HyperFrames): те же кегли, цвета и позиции, что у Монтажки (см. afisha_hf.py), но без
+    побуквенного проявления и свечения-тени. Слои одной таблички:
+    theme: огромное тяжёлое слово-тема (400 px, кремовое 78 %). С маской человека (mask=True) оно стоит ЗА человеком (слой "behind"),
+           без маски честно ставится над головой (слой "front").
+    over: тонкая строка над главным словом; main: главное слово (160 px, не шире ~620 px); hand: рукописное, наклон −7°."""
     cream = hex_to_ass(style.get("text", "#F3EBDD"))
-    accent = hex_to_ass(style.get("accent", "#FFD400"))
-    main_color = hex_to_ass(style.get("main", style.get("text", "#F3EBDD")))
-    over_color = hex_to_ass(style.get("over", style.get("main", style.get("text", "#F3EBDD"))))
-    bottom = min(int(number(style.get("bottom", 1440), 400, 1900, "style.bottom")), SAFE["bottom"] - 40)
+    main_color = hex_to_ass(style.get("main", "#8A0A12"))
+    hand_color = hex_to_ass(style.get("hand", style.get("main", "#8A0A12")))
+    glow = hex_to_ass(style.get("text", "#F3EBDD"), "60")
+    bottom = int(number(style.get("bottom", 1535), 1200, 1700, "style.bottom")) - 18  # низ строки ASS чуть ниже низа букв
     free_top = SAFE["top"] + 20
     free_bottom = (int(face["y"]) - 20) if face else 520
     lines = []
@@ -105,38 +106,29 @@ def afisha_lines(cards, style, face, ass_time, hex_to_ass, clean_text, mask=Fals
         start, end = ass_time(card["s"]), ass_time(card["e"])
         if card.get("theme") and mask and layer == "behind":
             word = clean_text(card["theme"]).upper()
-            size = int(min(720, 1000 / max(1, len(word) * 0.56)))  # огромное: почти во всю ширину кадра, голова закрывает середину
-            head_mid = (int(face["y"]) + int(face["h"]) * 0.08) if face else 700  # у макушки: буквы торчат над и по бокам головы
-            y_center = int(min(max(head_mid, SAFE["top"] + size * 0.5), SAFE["bottom"] - size * 0.5))
-            lines.append(_event(start, end, "Theme", 540, y_center + int(size * 0.35), 2, f"\\fs{size}\\alpha&H18&", cream, word, fade=(260, 160)))
+            size = int(min(560, 880 / max(1, len(word) * 0.46)))  # тяжёлый узкий шрифт: ~880 px шириной, иначе голова закроет слово целиком
+            center = int(style["theme_y"]) if "theme_y" in style else (int(face["y"]) + 130 if face else 520)  # у лба: голова закрывает середину букв
+            lines.append(_event(start, end, "Theme", 540, center + int(size * 0.36), 2, f"\\fs{size}\\alpha&H38&", cream, word, fade=(260, 100)))
         if layer != "front":
             continue
-        stack_bottom = bottom
-        main_size = 120
+        main_size = 130
         if card.get("main"):
             word = clean_text(card["main"]).upper()
-            size = int(min(150, 600 / max(1, len(word) * 0.46)))  # до 150 px, но не шире ~55–60 % кадра
-            main_size = size
-            lines.append(_event(start, end, "Main", 540, stack_bottom, 2, f"\\fs{size}", main_color, word))
-            stack_bottom -= int(size * 1.12)
-        if card.get("over") and bottom + 32 + 22 <= SAFE["bottom"] + 6:
-            # надстрочник стоит ПОД главным словом (над ним был бы рот и подбородок); нет места до зоны кнопок Instagram, его не ставим
+            main_size = int(min(160, 620 / max(1, len(word) * 0.42)))
+            lines.append(_event(start, end, "Main", 540, bottom, 2, f"\\fs{main_size}\\bord1\\3c{glow}\\blur2", main_color, word, fade=(130, 100)))
+        main_top = bottom - int(main_size * 0.92)
+        if card.get("over"):
             text = clean_text(card["over"]).upper()
-            size = 32
-            lines.append(_event(start, end, "Over", 540, bottom + size + 22, 2, f"\\fs{size}\\fsp6", over_color, text))
+            lines.append(_event(start, end, "Over", 540, main_top - 2, 2, f"\\fs30\\fsp1\\bord1\\3c{glow}\\blur2", main_color, text))
         if card.get("hand"):
             text = clean_text(card["hand"])
-            size = int(min(130, 420 / max(1, len(text) * 0.4)))
-            # слово-акцент пересекает правый нижний угол главного слова (как на афише), а не стоит над ртом
-            main_text = clean_text(card.get("main", ""))
-            main_width = int(main_size * 0.46 * len(main_text))
-            hand_x = min(540 + main_width // 2 - 110, W - SAFE["right"] - size * len(text) // 3)
-            lines.append(_event(start, end, "Hand", max(hand_x, 400), bottom + 6, 1, f"\\fs{size}\\frz-5", accent, text))
+            size = int(min(120, 560 / max(1, len(text) * 0.42)))
+            lines.append(_event(start, end, "Hand", 540, main_top + 40, 2, f"\\fs{size}\\frz7\\bord2\\3c{glow}\\blur3", hand_color, text, fade=(180, 100)))
         if card.get("theme") and not mask and free_bottom - free_top >= 140:
             word = clean_text(card["theme"]).upper()
             height = free_bottom - free_top
             size = int(min(300, height * 0.9, 640 / max(1, len(word) * 0.58)))
-            lines.append(_event(start, end, "Theme", 540, free_top + height // 2 + size // 3, 2, f"\\fs{size}\\alpha&H30&", cream, word))
+            lines.append(_event(start, end, "Theme", 540, free_top + height // 2 + size // 3, 2, f"\\fs{size}\\alpha&H38&", cream, word))
     return lines
 
 
@@ -146,8 +138,8 @@ def _event(start, end, style_name, x, y, align, tags, color, text, fade=(120, 12
 
 
 AFISHA_STYLES = (
-    ("Theme", "Onest Light", 0),
-    ("Main", "Oswald Bold", 0),
+    ("Theme", "Fira Sans Extra Condensed Medium", 0),
+    ("Main", "Fira Sans Extra Condensed ExtraBold", 0),
     ("Over", "Rubik Mono One", 0),
-    ("Hand", "Caveat", 0),
+    ("Hand", "Bad Script", 0),
 )

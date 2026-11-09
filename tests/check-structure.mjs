@@ -1,4 +1,4 @@
-// Проверка структуры плагина 2.7: манифест валиден, хуки только известные (памятка и установка набора), единственный файл кода hooks/kit-install.sh и он безопасен, у навыков есть frontmatter.
+// Проверка структуры плагина 2.8: манифест валиден, хуки только известные (памятка и установка набора), единственный файл кода hooks/kit-install.sh и он безопасен, у навыков есть frontmatter.
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,7 +26,7 @@ function readJson(file) {
 
 const manifest = readJson(join(plugin, '.claude-plugin', 'plugin.json'));
 check(manifest.name === 'ii-ramis', 'plugin.json: name должен быть ii-ramis');
-check(/^2\.7\.\d+$/.test(manifest.version ?? ''), 'plugin.json: version должен быть 2.7.x');
+check(/^2\.8\.\d+$/.test(manifest.version ?? ''), 'plugin.json: version должен быть 2.8.x');
 check(!('hooks' in manifest), 'plugin.json: не должно быть поля hooks');
 
 const marketplace = readJson(join(root, '.claude-plugin', 'marketplace.json'));
@@ -47,11 +47,13 @@ check(!JSON.stringify(hooks).includes('PreToolUse'), 'hooks.json: никаких
 check(!/svodka-send/.test(JSON.stringify(hooks.hooks?.SessionStart ?? [])) && JSON.stringify(hooks).split('command -v node').length === 3, 'hooks.json: Node нужен только хукам сводки и с проверкой, что он есть; установка набора от Node не зависит');
 check(JSON.stringify(hooks.hooks?.UserPromptSubmit ?? []).includes('reminder.txt'), 'hooks.json: UserPromptSubmit печатает reminder.txt');
 const reminder = readFileSync(join(plugin, 'hooks', 'reminder.txt'), 'utf8');
-check(reminder.includes('версия 2.7'), 'reminder.txt: версия должна совпадать с plugin.json');
+check(reminder.includes('версия 2.8'), 'reminder.txt: версия должна совпадать с plugin.json');
 check(!existsSync(join(plugin, 'scripts')), 'папки scripts быть не должно');
 const code = listFiles(plugin).filter((file) => ['.mjs', '.js', '.sh', '.ps1', '.py'].includes(extname(file)));
-const montazhScripts = ['common.py', 'transcribe.py', 'montage.py', 'critic.py', 'layouts.py', 'segment.py'].map((name) => join(plugin, 'skills', 'montazh', 'scripts', name));
-check(code.sort().join(',') === [join(plugin, 'hooks', 'kit-install.sh'), join(plugin, 'hooks', 'svodka-send.mjs'), ...montazhScripts].sort().join(','), `в плагине разрешены только два хука и шесть скриптов навыка montazh/scripts: ${code.join(', ')}`);
+const montazhScripts = ['common.py', 'transcribe.py', 'montage.py', 'critic.py', 'layouts.py', 'segment.py', 'afisha_hf.py'].map((name) => join(plugin, 'skills', 'montazh', 'scripts', name));
+// Установщики по ссылке (шрифты Афиши, модель маски): единственные скрипты со ссылками и сетью, проверяются отдельно ниже
+const installerScripts = ['safefetch.py', 'install_fonts.py', 'install_rvm.py'].map((name) => join(plugin, 'skills', 'montazh', 'scripts', name));
+check(code.sort().join(',') === [join(plugin, 'hooks', 'kit-install.sh'), join(plugin, 'hooks', 'svodka-send.mjs'), ...montazhScripts, ...installerScripts].sort().join(','), `в плагине разрешены только два хука и скрипты навыка montazh/scripts: ${code.join(', ')}`);
 
 // Хук сводки: безопасность
 const sv = readFileSync(join(plugin, 'hooks', 'svodka-send.mjs'), 'utf8');
@@ -86,11 +88,16 @@ check(/--mask\)\s+mask_mode/.test(kit) && /--no-deps --only-binary :all: -r "\$r
 {
   const req = join(plugin, 'skills', 'nabor', 'references', 'mask-requirements.txt');
   const lines = existsSync(req) ? readFileSync(req, 'utf8').split('\n').filter((l) => l && !l.startsWith('#')) : [];
-  check(lines.some((l) => l === 'mediapipe==0.10.14') && !lines.some((l) => /^(jax|jaxlib)==/.test(l)) && lines.every((l) => /^[A-Za-z0-9_.-]+==[0-9][\w.!+-]*$/.test(l)), 'mask-requirements.txt: точные версии, mediapipe 0.10.14, без jax');
+  check(lines.some((l) => l === 'onnxruntime==1.20.1') && !lines.some((l) => /^(jax|jaxlib|mediapipe)==/.test(l)) && lines.every((l) => /^[A-Za-z0-9_.-]+==[0-9][\w.!+-]*$/.test(l)), 'mask-requirements.txt: точные версии, onnxruntime 1.20.1, без mediapipe и jax');
   const fonts = join(plugin, 'skills', 'montazh', 'fonts');
-  check(['RubikMonoOne-Regular.ttf', 'Caveat-Regular.ttf', 'Oswald-Bold.ttf', 'Onest-Light.ttf'].every((f) => existsSync(join(fonts, f))), 'montazh/fonts: нет шрифтов стиля «Афиша»');
+  check(['RubikMonoOne-Regular.ttf', 'BadScript-Regular.ttf', 'FiraSansExtraCondensed-Medium.ttf', 'FiraSansExtraCondensed-ExtraBold.ttf', 'OFL-FiraSansExtraCondensed.txt', 'OFL-BadScript.txt'].every((f) => existsSync(join(fonts, f))), 'montazh/fonts: нет свободных шрифтов стиля «Афиша» с лицензиями');
+  check(!['DrukCyr', 'Benzin', 'Denistina'].some((n) => readdirSync(fonts).some((f) => f.includes(n))), 'montazh/fonts: платные шрифты Афиши не должны лежать в репозитории');
+  const hashFile = join(plugin, 'skills', 'montazh', 'references', 'afisha-fonts.sha256');
+  check(existsSync(hashFile) && /\b[0-9a-f]{64}\b/.test(readFileSync(hashFile, 'utf8')), 'afisha-fonts.sha256: нет закреплённой контрольной суммы архива шрифтов');
+  const rvm = readFileSync(join(plugin, 'skills', 'montazh', 'scripts', 'install_rvm.py'), 'utf8');
+  check(/SHA256 = "[0-9a-f]{64}"/.test(rvm) && /releases\/download\/v1\.0\.0\//.test(rvm) && !existsSync(join(fonts, 'rvm_mobilenetv3_fp32.onnx')), 'install_rvm.py: модель с официального релиза v1.0.0 с SHA256, в плагине её нет');
   const ofl = readFileSync(join(fonts, 'OFL.txt'), 'utf8');
-  check(ofl.includes('RubikMonoOne-Regular.ttf') && ofl.includes('Caveat-Regular.ttf'), 'OFL.txt: нет строк про Rubik Mono One и Caveat');
+  check(ofl.includes('RubikMonoOne-Regular.ttf') && ofl.includes('FiraSansExtraCondensed') && ofl.includes('BadScript-Regular.ttf'), 'OFL.txt: нет строк про Rubik Mono One, Fira Sans Extra Condensed и Bad Script');
 }
 check(/ffmpeg_has_subs\(\)/.test(kit) && /\(ass\|subtitles\)/.test(kit) && /brew install ffmpeg-full/.test(kit), 'kit-install.sh: ffmpeg проверяется на фильтр субтитров, без него ставится ffmpeg-full');
 check(kit.includes('-type l') && kit.includes('символические ссылки'), 'kit-install.sh: клон чужого репозитория проверяется на символические ссылки');
@@ -126,14 +133,14 @@ for (const skill of ['ii-ramis', 'proverka', 'sait', 'nabor', 'montazh']) {
 }
 
 const mainSkill = readFileSync(join(plugin, 'skills', 'ii-ramis', 'SKILL.md'), 'utf8');
-check(mainSkill.includes('ИИ Рамис на связи ✅ (версия 2.7)'), 'ii-ramis: нет приветствия версии 2.7');
+check(mainSkill.includes('ИИ Рамис на связи ✅ (версия 2.8)'), 'ii-ramis: нет приветствия версии 2.8');
 check(mainSkill.includes('🗣') && mainSkill.includes('🙋'), 'ii-ramis: нет блоков «Что случилось» / «Что сделать тебе»');
 
 const svodka = join(plugin, 'skills', 'ii-ramis', 'references', 'svodka.md');
 check(existsSync(svodka), 'нет references/svodka.md');
 if (existsSync(svodka)) {
   const text = readFileSync(svodka, 'utf8');
-  check(text.includes('plugin_version') && text.includes('2.7.2'), 'svodka.md: нет plugin_version 2.7.0');
+  check(text.includes('plugin_version') && text.includes('2.8.0'), 'svodka.md: нет plugin_version 2.8.0');
   check(!text.includes('Да/нет'), 'svodka.md: вопроса согласия быть не должно');
   check(text.includes('не отправляй сводки') && text.includes('consent: false'), 'svodka.md: нет правила отказа');
   check(!/curl -sS/.test(text) && text.includes('не запускай `curl`') && text.includes('📨 Сводка Рамису'), 'svodka.md: сводку отправляет хук, curl через Bash запрещён');
@@ -207,6 +214,14 @@ check(/Критик \(обязательный/.test(montazhSkill) && montazhSki
 check(!/\bheavy\b/.test(montazhSkill + readFileSync(join(montazhDir, 'references', 'rabota.md'), 'utf8')), 'montazh: слово heavy (у учеников его нет) упоминать нельзя');
 const montazhCode = montazhScripts.map((file) => (existsSync(file) ? readFileSync(file, 'utf8') : '')).join('\n');
 check(!/shutil\.rmtree|os\.remove|os\.unlink|\.unlink\(|rmdir|os\.system|shell=True|eval\(|exec\(|urllib|requests|socket|\.claude/.test(montazhCode), 'montazh/scripts: никаких удалений, shell=True, сети и обращений к ~/.claude (кроме faster-whisper в transcribe.py)'.replace('(кроме faster-whisper в transcribe.py)', ''));
+{
+  const installers = Object.fromEntries(installerScripts.map((file) => [file.split('/').pop(), existsSync(file) ? readFileSync(file, 'utf8') : '']));
+  const all = Object.values(installers).join('\n');
+  check(!/shell=True|os\.system|eval\(|exec\(|extractall|subprocess|__import__|importlib|pickle|\.claude/.test(all), 'установщики Афиши: никаких shell, subprocess, extractall, динамического импорта, обращений к ~/.claude');
+  check(/scheme != "https"/.test(installers['safefetch.py']) && /sha256/.test(installers['safefetch.py']) && /O_NOFOLLOW/.test(installers['safefetch.py']) && /max_bytes/.test(installers['safefetch.py']) && /name not in allowed/.test(installers['safefetch.py']), 'safefetch.py: только https, SHA256, лимит размера, белый список имён файлов, запись без ссылок');
+  check(/urllib/.test(installers['safefetch.py']) && !/urllib|requests|socket/.test(installers['install_fonts.py'] + installers['install_rvm.py']), 'сеть только в safefetch.py');
+  check(/FONTS_DIR = /.test(installers['install_fonts.py']) && /\.ii-ramis/.test(installers['install_fonts.py']) && !/[ \t]open\(.*['"]w/.test(all), 'install_fonts.py: пишет только в ~/.ii-ramis/fonts');
+}
 check(/def inside\(project, path\)/.test(montazhCode) && /commonpath/.test(montazhCode) && /media_file\(project, plan\["source"\]\)/.test(montazhCode), 'montazh/scripts: пути проверяются на выход за папку проекта');
 check(/faster-whisper==1\.2\.1/.test(montazhCode) && /revision=revision/.test(montazhCode) && /[0-9a-f]{40}/.test(montazhCode), 'montazh: расшифровка на закреплённой версии faster-whisper и модели');
 
@@ -235,4 +250,4 @@ if (failures.length > 0) {
   check(!/\| (mixkit|eleven) \|/.test(licenses) && !/pixabay/i.test(licenses.replace(/Pixabay Music[^.]*\./, '')), 'LICENSES.md: Mixkit, ElevenLabs и Pixabay в библиотеку не входят');
 }
 
-console.log('OK: структура плагина 2.7 в порядке');
+console.log('OK: структура плагина 2.8 в порядке');
