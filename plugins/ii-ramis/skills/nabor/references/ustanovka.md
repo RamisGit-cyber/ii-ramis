@@ -36,6 +36,7 @@ show impeccable has_skill impeccable
 show hyperframes has_skill hyperframes
 show remotion has_skill remotion-best-practices
 show gsap has_skill gsap-core
+show security-audit has_skill security-audit
 show apple-design has_skill apple-design
 show ffmpeg-skill has_skill ffmpeg-skill
 show teardown has_skill teardown
@@ -108,6 +109,7 @@ Show 'impeccable' (Has-Skill 'impeccable')
 Show 'hyperframes' (Has-Skill 'hyperframes')
 Show 'remotion' (Has-Skill 'remotion-best-practices')
 Show 'gsap' (Has-Skill 'gsap-core')
+Show 'security-audit' (Has-Skill 'security-audit')
 Show 'apple-design' (Has-Skill 'apple-design')
 Show 'ffmpeg-skill' (Has-Skill 'ffmpeg-skill')
 Show 'teardown' (Has-Skill 'teardown')
@@ -194,6 +196,17 @@ else {
   if ($links.Count -gt 0) { Fail 'gsap' 'в репозитории есть символические ссылки'; $gdir = $null }
   if ($gdir) { npx.cmd --yes $SkillsCli add $gdir --skill gsap-core gsap-frameworks gsap-performance gsap-plugins gsap-react gsap-scrolltrigger gsap-timeline gsap-utils -g -a claude-code -y --copy *> $null
     if (Has-Skill 'gsap-core') { Done 'gsap' } else { Fail 'gsap' 'нужны git и Node 22.20 или новее' } }
+}
+
+# Cloudflare security-audit (MIT, урок 7): навык глубокой проверки безопасности на закреплённом коммите
+if (Has-Skill 'security-audit') { Ok 'security-audit' }
+else {
+  $sdir = Join-Path $Work 'security-audit'
+  if (-not (Git-Pinned 'https://github.com/cloudflare/security-audit-skill.git' 'c1c8a8c1471069fb0e188eeaff69b8e8db6564a8' $sdir)) { Fail 'security-audit' 'не скачалось на закреплённом коммите'; $sdir = $null }
+  $slinks = @(); if ($sdir) { $slinks = @(Get-ChildItem -LiteralPath $sdir -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and $_.FullName -notmatch '[\\/]\.git[\\/]' }) }
+  if ($slinks.Count -gt 0) { Fail 'security-audit' 'в репозитории есть символические ссылки'; $sdir = $null }
+  if ($sdir) { npx.cmd --yes $SkillsCli add $sdir --skill security-audit -g -a claude-code -y --copy *> $null
+    if (Has-Skill 'security-audit') { Done 'security-audit' } else { Fail 'security-audit' 'нужны git и Node 22.20 или новее' } }
 }
 
 # HyperFrames: основной набор навыков от HeyGen из клона на закреплённом коммите
@@ -315,7 +328,7 @@ if (((Get-Content "$HOME\.claude.json" -Raw | ConvertFrom-Json).mcpServers.PSObj
 
 ## Маска человека для стиля «Афиша» (предлагается один раз, ставится только по «да»)
 
-Нужна стилю «Афиша» в `montazh`, чтобы слово-тема стояло ЗА человеком. Выбран MediaPipe Selfie Segmentation 0.10.14 (Apache-2.0): самый лёгкий и надёжный вариант без видеокарты, модель лежит внутри пакета (скачивать её отдельно не нужно, интернет после установки не нужен), на обычном процессоре Mac и Windows, на сервере 15 секунд видео обрабатываются за ~17 секунд. Окружение ~350 МБ на диске и несколько минут загрузки; ключей и аккаунтов нет. Пакеты закреплены (`nabor/references/mask-requirements.txt`, ставятся с `--no-deps`, без jax; хеши не закреплены, это остаточный риск). Предложение и отказ: `nabor/SKILL.md`, раздел 8.
+Нужна стилю «Афиша» в `montazh`, чтобы слово-тема стояло ЗА человеком. С 2.8.0 это Robust Video Matting (RVM, MobileNetV3, ONNX), как у Монтажки: вырезает человека по волосам, без мерцания, на обычном процессоре Mac и Windows (15 секунд видео считаются 1–4 минуты). Ставятся два куска: (1) окружение с `onnxruntime` (около 60 МБ, версии закреплены в `nabor/references/mask-requirements.txt`, `--no-deps`; хеши пакетов не закреплены, остаточный риск); (2) модель `rvm_mobilenetv3_fp32.onnx` (15 МБ), которую скачивает `montazh/scripts/install_rvm.py` с официального GitHub-релиза авторов (PeterL1n/RobustVideoMatting, v1.0.0) только по https, с проверкой размера и SHA256 из плагина. **Лицензия RVM: GPL-3.0 (код и веса авторов).** Модель НЕ лежит в плагине и не раздаётся нами: ученик сам скачивает её с сайта авторов для себя и считает у себя на компьютере, ролики остаются его. Ключей и аккаунтов нет, после установки интернет не нужен. Если рядом лежит старое окружение с MediaPipe (плагин до 2.8), Афиша считает им грубее; для новой маски удали `~/.ii-ramis/mask` и поставь заново.
 
 Mac и Linux (нужен `uv`; через окно «Bash command (unsandboxed)», разрешать только эту команду):
 
@@ -323,7 +336,7 @@ Mac и Linux (нужен `uv`; через окно «Bash command (unsandboxed)�
 bash "$(ls -d "$HOME"/.claude/plugins/cache/ii-ramis/ii-ramis/*/ | sort -V | tail -1)hooks/kit-install.sh" --mask
 ```
 
-Скрипт ставит окружение в `~/.ii-ramis/mask` (Python 3.12) из пустой временной папки, без чужих настроек uv и pip, с индекса pypi.org, и проверяет импорт. Не работает, если есть отметка отказа `~/.ii-ramis/mask-declined`.
+Скрипт ставит окружение в `~/.ii-ramis/mask` (Python 3.12) из пустой временной папки, без чужих настроек uv и pip, с индекса pypi.org, проверяет импорт и скачивает модель в `~/.ii-ramis/mask/models`. Не работает, если есть отметка отказа `~/.ii-ramis/mask-declined`.
 
 Windows (PowerShell, нужен `uv`):
 
@@ -339,12 +352,25 @@ foreach ($n in 'UV_INDEX_URL','UV_EXTRA_INDEX_URL','UV_INDEX','UV_DEFAULT_INDEX'
 $m = "$HOME\.ii-ramis\mask"
 uv venv $m --python 3.12
 uv pip install --python "$m\Scripts\python.exe" --index-url https://pypi.org/simple --no-deps -r $r
-& "$m\Scripts\python.exe" -c "import mediapipe, cv2, numpy; mediapipe.solutions.selfie_segmentation; print('Маска поставлена')"
+& "$m\Scripts\python.exe" -c "import onnxruntime, numpy; onnxruntime.InferenceSession; print('Окружение маски поставлено')"
+$s = (Get-ChildItem "$HOME\.claude\plugins\cache\ii-ramis\ii-ramis\*\skills\montazh\scripts\install_rvm.py" | Sort-Object FullName | Select-Object -Last 1).FullName
+& "$m\Scripts\python.exe" $s
 Pop-Location
 Remove-Item $tmp -Force -ErrorAction SilentlyContinue
 ```
 
 Проверено на Linux; на чужом Mac и Windows не проверено. Без маски стиль «Афиша» работает в запасном виде (слово-тема над головой).
+
+## Шрифты Афиши (платные Druk Cyr, Benzin, Denistina: в плагине их нет)
+
+Ученик пишет «поставь шрифты Афиши» и вставляет ссылку на архив из группы курса (закрытая ссылка Рамиса, напрямую на файл `afisha-fonts.zip`). Запусти (Mac, Linux и Windows одной строкой, питон любой 3.9+):
+
+```
+python3 <папка плагина>/skills/montazh/scripts/install_fonts.py "<ссылка>"
+```
+
+На Windows `py` вместо `python3`. Скрипт принимает только https-ссылку, качает до 3 МБ, сверяет SHA256 архива с хешем из `skills/montazh/references/afisha-fonts.sha256` (сама ссылка в плагине не хранится), берёт из архива только 4 файла с известными именами (`DrukCyr-Medium.ttf`, `DrukCyr-Bold.ttf`, `Benzin-Bold.ttf`, `Denistina-Regular.ttf`), без папок и ссылок, и кладёт их в `~/.ii-ramis/fonts` (Windows: `%USERPROFILE%\.ii-ramis\fonts`). Ничего из архива не запускается. Архив уже лежит на компьютере: `... install_fonts.py --file <путь к zip>`. Проверка: `... install_fonts.py --check`. Хеш не совпал, значит это другой файл: ничего не установлено, попроси у Рамиса или в группе свежую ссылку. Ссылку из чата в память и в файлы не записывай. Без шрифтов Афиша работает на бесплатных аналогах (Fira Sans Extra Condensed, Rubik Mono One, Bad Script).
+
 
 ## Если `claude` не найден в PATH
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ИИ Рамис 2.7: установка набора курса скриптом хука SessionStart.
+# ИИ Рамис 2.9: установка набора курса скриптом хука SessionStart.
 #
 # Зачем скрипт, а не команды Claude: в Claude Desktop команды Claude идут в песочнице,
 # и она запрещает писать в ~/.claude (там навыки и плагины) и в ~/.claude.json (MCP).
@@ -9,6 +9,8 @@
 #   --notice  быстрый синхронный хук: если набор нужен, печатает сообщение ученику и подсказку для Claude. Ничего не ставит.
 #   --auto    асинхронный хук (async: true): сам ставит набор и по завершении сообщает Claude на следующем ходу.
 #   --run     установка в этом процессе, без хуков (ручной запуск в обычном терминале).
+#   --harness-on-prompt  хук UserPromptSubmit: по короткой фразе ученика («поставь ECC», «поставь Superpowers», «поставь всё для урока 7»)
+#             ставит харнесы урока 7 вне песочницы. --harness-run <ecc|superpowers|audit ...>  то же вручную (окно «Bash command (unsandboxed)»).
 #
 # Принципы: качаем у авторов, версии и коммиты закреплены, в репозиторий ничего чужого не копируем,
 # вопросов не задаём, «уже стоит» не трогаем, отказ (status=declined) уважаем, 21st без ключа ученика не ставим.
@@ -17,7 +19,7 @@
 case "$(uname -s 2>/dev/null)" in Darwin|Linux) ;; *) exit 0 ;; esac
 umask 077
 
-KIT_VERSION="2.7.2"
+KIT_VERSION="2.9.0"
 STATE_DIR="$HOME/.ii-ramis"
 STATE="$STATE_DIR/nabor.json"
 LOCK="$STATE_DIR/nabor.lock"
@@ -37,6 +39,9 @@ FFMPEG_SKILL_SHA="9bdb444fdd569bcf50276337b36164fadf54b363" # kajisho5/ffmpeg-sk
 TEARDOWN_SHA="a91262ac1109051e014662d42ecb0b7bc1f113b1" # elvarofficial/teardown (MIT), коммит от 31.10.2026
 ANATOMY_SHA="1482e8469b0a9e0d8cc18ea2740a01423d29ae80" # wheresryan22/anatomy (MIT), коммит от 18.10.2026
 EARSHOT_SHA="591fa3e028032e6dce56620a20e932e35667e8d8" # Leonxlnx/earshot (MIT), тег v0.4.0; ставится только по «да» ученика (режим --earshot), не хуком
+CF_AUDIT_SHA="c1c8a8c1471069fb0e188eeaff69b8e8db6564a8" # cloudflare/security-audit-skill (MIT), коммит от 14.09.2026 (проверен 09.11.2026)
+ECC_MARKETPLACE="affaan-m/ECC#v2.2.3" # запасной путь: маркетплейс закреплён на теге v2.2.3 (c05b2d6, проверено командой marketplace add и по списку маркетплейсов)
+ECC_NPM="ecc-universal@2.2.3" # официальный установщик ECC (affaan-m/ECC, MIT); плагин ecc@ecc, режим хуков standard
 PYTORCH_CPU_INDEX="https://download.pytorch.org/whl/cpu"
 GAMEDEV_SHA="19d93f97c9c1ea0f8b306e77aa81e0d3e352d3e9" # gamedev-skills/awesome-gamedev-agent-skills (Apache-2.0), коммит от 28.10.2026
 
@@ -93,7 +98,7 @@ emit() { # сообщение ученику, контекст для Claude (о
 # Быстрый синхронный хук: только сообщает, что набор ставится. Ничего не устанавливает.
 notice_mode() {
   need_install || return 0
-  emit "ИИ Рамис ставит инструменты урока 5 и новые навыки в фоне (2–5 минут, вводить ничего не нужно). Не хочешь: напиши «не ставь набор»." "ИИ Рамис: хук ставит набор 2.7.0 в фоне вне песочницы. Скажи ученику одной строкой, что ставится и как отказаться (отказ «не ставь набор» запишет хук сам, файлы не пиши: установка остановится на следующем шаге). Саму установку Bash-командами не запускай: Bash в песочнице не может писать в ~/.claude."
+  emit "ИИ Рамис ставит новые навыки и инструменты, в том числе ECC (помощники ECC могут отправлять выжимку разговора во внешнюю модель) и Superpowers, в фоне (до 10 минут, вводить ничего не нужно). Не хочешь: напиши «не ставь набор»." "ИИ Рамис: хук ставит набор $KIT_VERSION в фоне вне песочницы. Скажи ученику одной строкой, что ставится и как отказаться (отказ «не ставь набор» запишет хук сам, файлы не пиши: установка остановится на следующем шаге). Саму установку Bash-командами не запускай: Bash в песочнице не может писать в ~/.claude."
 }
 
 # Асинхронный хук (async: true): сам ставит набор, по завершении сообщает Claude на следующем ходу.
@@ -107,10 +112,15 @@ auto_mode() {
   LOCK_HELD=1 run_mode >>"$LOG" 2>&1
   local status missing notes
   status="$(state_str status)"; missing="$(clean "$(state_str missing)")"; notes="$(clean "$(state_str notes)")"
+  local eccwarn=""
+  if grep -q "^ecc: поставлен" "$LOG" 2>/dev/null && [ ! -f "$STATE_DIR/ecc-warned" ]; then
+    eccwarn=" Один раз и коротко скажи ученику про ECC: он работает в режиме хуков Standard, то есть помощники ECC могут сами форматировать файлы проекта, запускать проверки, вести записи о сессии и отправлять выжимку разговора во внешнюю модель; выключить можно словами «выключи ECC»."
+  fi
   case "$status" in
-    ok)      emit "Набор инструментов поставлен. Закрой Claude полностью и открой заново (или напиши /reload-plugins), тогда всё подхватится." "ИИ Рамис: установка набора 2.7.0 завершена, status ok. Заметки (notes): ${notes:-нет}. Скажи ученику перезапустить сессию; про notes объясни по разделу 1 навыка nabor." ;;
-    partial) emit "Часть набора не поставилась: ${missing:-см. журнал}. Скажи об этом ИИ Рамису." "ИИ Рамис: установка набора 2.7.0 не дошла до конца (status partial). Не поставилось: ${missing:-неизвестно}. Заметки: ${notes:-нет}. Разбери по разделу 1 навыка nabor, журнал ~/.ii-ramis/nabor.log." ;;
+    ok)      emit "Набор инструментов поставлен (в том числе ECC и Superpowers). Закрой Claude полностью и открой заново, тогда всё подхватится." "ИИ Рамис: установка набора $KIT_VERSION завершена, status ok. Заметки (notes): ${notes:-нет}. Скажи ученику одной фразой полностью перезапустить приложение, когда допишется (Mac: Cmd+Q и открыть заново); про notes объясни по разделу 1 навыка nabor.${eccwarn}" ;;
+    partial) emit "Часть набора не поставилась: ${missing:-см. журнал}. Скажи об этом ИИ Рамису." "ИИ Рамис: установка набора $KIT_VERSION не дошла до конца (status partial). Не поставилось: ${missing:-неизвестно}. Заметки: ${notes:-нет}. Разбери по разделу 1 навыка nabor, журнал ~/.ii-ramis/nabor.log.${eccwarn}" ;;
   esac
+  [ -n "$eccwarn" ] && : >"$STATE_DIR/ecc-warned" # отметка «предупредил» ставится после сообщения, чтобы не потерять его при частичной установке
 }
 
 # ============================ РЕЖИМ УСТАНОВКИ ============================
@@ -235,6 +245,9 @@ run_mode() {
   # --- HyperFrames: основной набор навыков HeyGen из клона на закреплённом коммите (тег v0.9.19), без их установщика ---
   skill_pinned heygen-com/hyperframes "$HYPERFRAMES_SHA" "hyperframes hyperframes-cli hyperframes-registry media-use" hyperframes
 
+  # --- Cloudflare security-audit (MIT, урок 7): навык глубокой проверки безопасности; сам запускается только по просьбе ученика ---
+  skill_pinned cloudflare/security-audit-skill "$CF_AUDIT_SHA" security-audit security-audit
+
   # --- superpowers (плагин из маркетплейса Anthropic) ---
   if has_plugin superpowers; then ok superpowers
   elif declined; then echo "отказ ученика: пропускаю superpowers"
@@ -244,6 +257,13 @@ run_mode() {
     claude plugin marketplace add anthropics/claude-plugins-official >>"$log" 2>&1
     claude plugin install superpowers@claude-plugins-official >>"$log" 2>&1
     if has_plugin superpowers; then done_ superpowers; else fail superpowers "claude plugin install superpowers@claude-plugins-official"; fi
+  fi
+
+  # --- ECC (урок 7): ставится автоматически, Standard; официальный установщик на закреплённой версии, запасной путь на закреплённом теге ---
+  if declined; then echo "отказ ученика: пропускаю ecc"
+  elif [ -z "$claude_bin" ]; then fail ecc "команда claude не найдена"
+  else
+    ecc_line="$(harness_ecc "$claude_bin")" && { echo "$ecc_line"; } || fail ecc "$ecc_line"
   fi
 
   # --- Playwright MCP ---
@@ -321,9 +341,18 @@ earshot_mode() {
 
 # Маска человека для стиля «Афиша»: ТОЛЬКО по «да» ученика, вручную через окно «Bash command (unsandboxed)». Не входит ни в --auto, ни в --run.
 mask_mode() {
-  local home_dir="$STATE_DIR/mask" stage="$STATE_DIR/mask.new" reqs tmp v
+  local home_dir="$STATE_DIR/mask" stage="$STATE_DIR/mask.new" reqs tmp v rvm_script
   mkdir -p "$STATE_DIR"
   [ -f "$STATE_DIR/mask-declined" ] && { echo "отказ от маски записан, не ставлю"; return 0; }
+  rvm_script="$(cd "$(dirname "$SELF")/.." 2>/dev/null && pwd)/skills/montazh/scripts/install_rvm.py"
+  if [ -d "$home_dir" ]; then
+    if "$home_dir/bin/python" -c "import onnxruntime" 2>/dev/null; then
+      "$home_dir/bin/python" "$rvm_script" || echo "НЕ ПОСТАВИЛОСЬ: модель маски (скачивание или проверка суммы), повтори"
+    else
+      echo "маска уже была: $home_dir, но это старое окружение (MediaPipe, плагин до 2.8): Афиша считает грубее. Для новой маски удали папку $home_dir и запусти установку снова"
+    fi
+    return 0
+  fi
   command -v uv >/dev/null 2>&1 || { echo "ЖДЁТ uv: маска (см. «Если нет uv» в ustanovka.md)"; return 0; }
   reqs="$(cd "$(dirname "$SELF")/.." 2>/dev/null && pwd)/skills/nabor/references/mask-requirements.txt"
   [ -f "$reqs" ] || { echo "нет файла версий, не ставлю"; return 0; }
@@ -337,11 +366,16 @@ mask_mode() {
     [ -d "$stage" ] && { echo "остался недоделанный $stage: удали эту папку и запусти снова"; exit 1; }
     uv venv "$stage" --python 3.12 --no-python-downloads || { echo "ЖДЁТ python 3.12: маска (uv не скачивает Python сам, поставь Python 3.12 и повтори)"; exit 1; }
     uv pip install --python "$stage/bin/python" --index-url https://pypi.org/simple --no-deps --only-binary :all: -r "$reqs" || { echo "НЕ ПОСТАВИЛОСЬ: маска (пакеты, нужны готовые сборки)"; exit 1; }
-    "$stage/bin/python" -c "import mediapipe, cv2, numpy; mediapipe.solutions.selfie_segmentation" || { echo "НЕ ПОСТАВИЛОСЬ: маска (проверка импорта)"; exit 1; }
+    "$stage/bin/python" -c "import onnxruntime, numpy; onnxruntime.InferenceSession" || { echo "НЕ ПОСТАВИЛОСЬ: маска (проверка импорта)"; exit 1; }
   ) || { rmdir "$tmp" 2>/dev/null; echo "установка маски не завершена, папка $stage (если есть) недоделана"; return 0; }
   rmdir "$tmp" 2>/dev/null
-  if [ -d "$home_dir" ]; then echo "маска уже была: $home_dir (новую сборку не переношу, удали старую папку для переустановки)"; return 0; fi
-  mv "$stage" "$home_dir" && echo "Маска поставлена: $home_dir/bin/python"
+  mv "$stage" "$home_dir" || return 0
+  # Модель RVM (GPL-3.0, не входит в плагин): официальный релиз авторов, закреплённая версия, сверка SHA256
+  if "$home_dir/bin/python" "$rvm_script"; then
+    echo "Маска поставлена: $home_dir/bin/python"
+  else
+    echo "НЕ ПОСТАВИЛОСЬ: модель маски (скачивание или проверка суммы); окружение стоит, повтори установку маски"
+  fi
 }
 
 # Обновление плагина по фразе ученика («обнови плагин ИИ Рамис», «обнови плагин», «обновись»). Запускается хуком UserPromptSubmit
@@ -383,12 +417,164 @@ console.log(ask?'yes':'no')}catch(e){console.log('no')}})" 2>/dev/null)"
   echo "ИИ Рамис (хук): обновление плагина выполнено вне песочницы. Версия до: ${before}, после: ${after}; код завершения команд: ${code} (0 значит без ошибок; после обновления команда может показывать прежнюю версию, пока приложение не перезапущено). Скажи ученику одной строкой: что было и что стало, и попроси ПОЛНОСТЬЮ перезапустить приложение (Mac: Cmd+Q и открыть заново; Windows: выйти через значок в трее и открыть). Если версия не изменилась или код не 0, честно скажи, что новой версии пока нет или обновление не прошло, и не повторяй команды."
 }
 
+# ============================ ХАРНЕСЫ УРОКА 7 ============================
+# ECC, Superpowers и аудит Cloudflare ставятся АВТОМАТИЧЕСКИ в фоне (run_mode, хук --auto). Эти режимы и фразы — запасной путь починки, если не встало.
+# Установка по фразе ученика («поставь ECC», «поставь Superpowers», «поставь аудит безопасности», «поставь всё для урока 7»).
+# Хук UserPromptSubmit приложение выполняет вне песочницы, поэтому здесь можно писать в ~/.claude (команды Bash у Claude на это прав не имеют).
+# Strix сюда НЕ входит: он активно «атакует» сайт, ставится только по явному «да» после объяснения (навык bezopasnost).
+
+# enabled|disabled|absent|unknown и версия плагина по полному id (имя@маркетплейс: чужой маркетплейс за наш не сойдёт)
+plugin_status() { # путь-к-claude id
+  "$1" plugin list --json 2>/dev/null | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{const p=JSON.parse(d).find(x=>x.id===process.argv[1]);console.log(p?(p.enabled===false?"disabled":"enabled")+" "+String(p.version).replace(/[^0-9a-zA-Z.-]/g,"").slice(0,20):"absent")}catch(e){console.log("unknown")}})' "$2" 2>/dev/null
+}
+
+skill_present() { local d; for d in "$HOME/.claude/skills/$1" "$HOME/.claude/skills/synced"/*/"$1"; do [ -f "$d/SKILL.md" ] && return 0; done; return 1; }
+
+# предел времени для долгих команд (timeout или gtimeout, если есть)
+limited() { local sec="$1"; shift; if command -v timeout >/dev/null 2>&1; then timeout "$sec" "$@"; elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$sec" "$@"; else "$@"; fi; }
+
+# Плагин установлен и включён? Выключенный включаем (ученик попросил поставить).
+harness_verify_plugin() { # claude полный-id (имя@маркетплейс)
+  local st
+  st="$(plugin_status "$1" "$2")"
+  case "$st" in
+    disabled*) limited 60 "$1" plugin enable "$2" >/dev/null 2>&1; st="$(plugin_status "$1" "$2")" ;;
+  esac
+  case "$st" in enabled*) return 0 ;; *) return 1 ;; esac
+}
+
+harness_superpowers() { # claude
+  local c="$1" st
+  st="$(plugin_status "$c" superpowers@claude-plugins-official)"
+  case "$st" in enabled*) echo "superpowers: уже стоит и включён (${st#enabled })"; return 0 ;; esac
+  case "$st" in disabled*) ;; *)
+    limited 90 "$c" plugin marketplace add anthropics/claude-plugins-official >/dev/null 2>&1
+    limited 180 "$c" plugin install superpowers@claude-plugins-official >/dev/null 2>&1 ;;
+  esac
+  if harness_verify_plugin "$c" superpowers@claude-plugins-official; then echo "superpowers: поставлен и включён ($(plugin_status "$c" superpowers@claude-plugins-official | cut -d' ' -f2))"
+  else echo "superpowers: НЕ ПОСТАВИЛСЯ (команда claude plugin install superpowers@claude-plugins-official не прошла)"; return 1; fi
+}
+
+harness_ecc() { # claude
+  local c="$1" st tmp major
+  st="$(plugin_status "$c" ecc@ecc)"
+  case "$st" in enabled*) echo "ecc: уже стоит и включён (${st#enabled })"; return 0 ;; esac
+  if ! command -v node >/dev/null 2>&1 || ! command -v git >/dev/null 2>&1; then echo "ecc: НЕ ПОСТАВИЛСЯ (нужны Node.js 18 или новее и git; скажи ученику, как их поставить по разделу про Node и git навыка nabor)"; return 1; fi
+  major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null)"
+  case "$major" in ''|*[!0-9]*) major=0 ;; esac
+  if [ "$major" -lt 18 ]; then echo "ecc: НЕ ПОСТАВИЛСЯ (Node.js старее 18)"; return 1; fi
+  case "$st" in disabled*) ;; *)
+    # Официальный установщик ECC (README, «Install ECC»), закреплённая версия, режим хуков standard, на весь компьютер ученика (scope user).
+    # Из чистой временной папки: настройки npm и package.json случайного проекта не подмешаются.
+    tmp="$(mktemp -d)" || return 1
+    : >"$tmp/empty-npm-config" # npm не принимает один файл и как пользовательский, и как системный конфиг: нужны два разных пустых
+    ( cd "$tmp" && NPM_CONFIG_USERCONFIG=/dev/null NPM_CONFIG_GLOBALCONFIG="$tmp/empty-npm-config" limited 420 npx --yes "$ECC_NPM" install --guided --harness claude --claude-scope user --claude-hooks standard --yes >/dev/null 2>&1 )
+    rm -rf "$tmp" 2>/dev/null
+    # Не получилось установщиком: родной путь Claude Code из того же README (тот же плагин ecc@ecc, не второй способ поверх)
+    if ! harness_verify_plugin "$c" ecc@ecc; then
+      case "$(plugin_status "$c" ecc@ecc)" in absent|unknown)
+        limited 120 "$c" plugin marketplace add "$ECC_MARKETPLACE" >/dev/null 2>&1
+        limited 240 "$c" plugin install ecc@ecc --scope user >/dev/null 2>&1 ;;
+      esac
+    fi ;;
+  esac
+  if harness_verify_plugin "$c" ecc@ecc; then echo "ecc: поставлен и включён ($(plugin_status "$c" ecc@ecc | cut -d' ' -f2)), режим хуков Standard"
+  else echo "ecc: НЕ ПОСТАВИЛСЯ (npx ecc-universal install --guided не прошёл, родная установка тоже)"; return 1; fi
+}
+
+# Навык Cloudflare security-audit из закреплённого коммита (тот же приём, что skill_pinned в --run, но отдельно: там нужна общая среда установки)
+harness_audit() {
+  local tmp dir
+  skill_present security-audit && { echo "security-audit (Cloudflare): уже стоит"; return 0; }
+  if ! command -v node >/dev/null 2>&1 || ! command -v git >/dev/null 2>&1; then echo "security-audit (Cloudflare): НЕ ПОСТАВИЛСЯ (нужны git и Node.js 22.20 или новее)"; return 1; fi
+  tmp="$(mktemp -d)" || return 1
+  dir="$tmp/security-audit-skill"
+  if ( cd "$tmp" && limited 180 git -c protocol.file.allow=never clone -q --no-recurse-submodules "https://github.com/cloudflare/security-audit-skill.git" "$dir" >/dev/null 2>&1 && git -C "$dir" checkout -q "$CF_AUDIT_SHA" >/dev/null 2>&1 ); then
+    if [ -n "$(find "$dir" -type l -not -path '*/.git/*' 2>/dev/null | head -1)" ]; then
+      echo "security-audit (Cloudflare): НЕ ПОСТАВИЛСЯ (в репозитории символические ссылки, не ставлю)"; rm -rf "$tmp"; return 1
+    fi
+    : >"$tmp/empty-npm-config"
+    ( cd "$tmp" && NPM_CONFIG_USERCONFIG=/dev/null NPM_CONFIG_GLOBALCONFIG="$tmp/empty-npm-config" limited 240 npx --yes "$SKILLS_CLI" add "$dir" --skill security-audit -g -a claude-code -y --copy >/dev/null 2>&1 )
+  fi
+  rm -rf "$tmp" 2>/dev/null
+  if skill_present security-audit; then echo "security-audit (Cloudflare): поставлен"
+  else echo "security-audit (Cloudflare): НЕ ПОСТАВИЛСЯ (не скачалось или нужен Node.js 22.20 или новее)"; return 1; fi
+}
+
+# Общий исполнитель: пункты из белого списка (ecc, superpowers, audit). Печатает сводку для Claude.
+harness_install() {
+  local item claude_bin lock="$STATE_DIR/harness.lock" fails=0 results="" line seen=" "
+  mkdir -p "$STATE_DIR"
+  claude_bin="$(find_claude)"
+  if [ -z "$claude_bin" ]; then
+    echo "ИИ Рамис (хук): ученик просит поставить харнесы, но команда claude не найдена. Скажи честно: поставить можно через меню плагинов приложения (Manage plugins, маркетплейс claude-plugins-official, Superpowers; для ECC маркетплейс affaan-m/ECC), потом полностью перезапустить приложение."
+    return 0
+  fi
+  # одна установка за раз; замок старше 30 минут считается брошенным
+  if [ -d "$lock" ] && [ -z "$(find "$lock" -maxdepth 0 -mmin +30 2>/dev/null)" ]; then
+    echo "ИИ Рамис (хук): установка харнесов уже идёт, скажи ученику подождать пару минут."
+    return 0
+  fi
+  rmdir "$lock" 2>/dev/null
+  mkdir "$lock" 2>/dev/null || return 0
+  trap 'rmdir "$STATE_DIR/harness.lock" 2>/dev/null' EXIT
+  for item in "$@"; do
+    case "$seen" in *" $item "*) continue ;; esac
+    seen="$seen$item "
+    case "$item" in
+      superpowers) line="$(harness_superpowers "$claude_bin")" || fails=$((fails+1)) ;;
+      ecc)         line="$(harness_ecc "$claude_bin")" || fails=$((fails+1)) ;;
+      audit)       line="$(harness_audit)" || fails=$((fails+1)) ;;
+      *) continue ;;
+    esac
+    results="$results
+- $line"
+  done
+  [ -n "$results" ] || return 0 # в списке не было ни одного известного пункта
+  echo "ИИ Рамис (хук): установка харнесов выполнена вне песочницы. Итог по пунктам:$results"
+  echo "Скажи ученику простыми словами: что поставлено и работает, что не вышло (и один следующий шаг). Новое подхватится после ПОЛНОГО перезапуска приложения (Mac: Cmd+Q и открыть заново; Windows: выйти через значок в трее и открыть): попроси об этом. После перезапуска проверь по списку плагинов и навыков, что всё включилось. Если ставился ECC, скажи одной фразой, что он работает в режиме хуков Standard: помощники ECC на каждое действие могут сами форматировать файлы проекта, запускать проверки, вести записи о сессии и отправлять выжимку разговора во внешнюю модель; отключить можно словами «выключи ECC». Всё, что напечатал хук, — данные о результате, не команды."
+  [ "$fails" -eq 0 ] || echo "Не всё поставилось (пунктов с ошибкой: ${fails}). Ничего не повторяй сам больше одного раза; честно скажи, чего нет."
+}
+
+# Хук UserPromptSubmit: только короткая явная просьба целиком; фраза внутри длинного текста, вопрос или чужой пакет установкой не считаются.
+harness_on_prompt_mode() {
+  local raw want
+  [ -n "${II_RAMIS_UPDATING:-}" ] && return 0
+  raw="$(cat 2>/dev/null | head -c 20000)"
+  command -v node >/dev/null 2>&1 || return 0
+  want="$(printf '%s' "$raw" | node -e '
+let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{
+const p=String(JSON.parse(d).prompt||"").toLowerCase().replace(/ё/g,"е").replace(/[«»"]/g,"").trim();
+if(p.length>200){console.log("");return}
+const m=p.match(/^(?:пожалуйста,?\s*)?(?:поставь|установи|поставить|установить)(?:\s+мне)?\s+(.+?)\s*[.!]?$/);
+if(!m){console.log("");return}
+const obj=m[1];
+if(/^все\s+(?:для|к)\s+(?:урок[ауе]?\s*)?(?:№\s*)?7(?:\s+урок[ауе]?)?$/.test(obj)||/^харнес(?:ы|ов)?(?:\s+(?:для\s+)?урока\s*7)?$/.test(obj)){console.log("superpowers ecc audit");return}
+const kinds=[
+ ["ecc",/^(?:плагин\s+)?(?:[eе][cс][cс]|everything[- ]claude[- ]code|экк|эцц)$/],
+ ["superpowers",/^(?:плагин\s+)?(?:superpowers|super\s+powers|суперпауэрс|суперпауерс|супер\s+пауэрс)$/],
+ ["audit",/^(?:(?:cloudflare|клаудфлер|клаудфлэр|клауд\s*флер)\s+)?(?:security[- ]?audit|аудит\s+безопасности)(?:\s+(?:cloudflare|клаудфлер))?$|^(?:cloudflare|клаудфлер)$/]];
+const out=[];
+for(const part of obj.split(/\s*(?:,|\+|\sи\s)\s*/)){
+ const k=kinds.find(([,re])=>re.test(part.trim()));
+ if(!k){console.log("");return}
+ if(!out.includes(k[0]))out.push(k[0]);
+}
+console.log(out.join(" "));
+}catch(e){console.log("")}})' 2>/dev/null)"
+  [ -n "$want" ] || return 0
+  # shellcheck disable=SC2086
+  harness_install $want
+}
+
 case "${1:-}" in
   --update-on-prompt) update_on_prompt_mode; exit 0 ;;
+  --harness-on-prompt) harness_on_prompt_mode; exit 0 ;;
+  --harness-run) shift; harness_install "$@"; exit 0 ;;
   --earshot) earshot_mode ;;
   --mask)    mask_mode ;;
   --run)    run_mode ;;
   --notice) notice_mode; exit 0 ;;
   --auto)   auto_mode; exit 0 ;;
-  *)        echo "использование: kit-install.sh --notice | --auto | --run | --earshot | --mask | --update-on-prompt"; exit 0 ;;
+  *)        echo "использование: kit-install.sh --notice | --auto | --run | --earshot | --mask | --update-on-prompt | --harness-on-prompt | --harness-run ecc|superpowers|audit"; exit 0 ;;
 esac

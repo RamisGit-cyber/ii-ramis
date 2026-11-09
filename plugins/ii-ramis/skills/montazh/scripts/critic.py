@@ -106,12 +106,18 @@ def check_picture(workdir, face, has_inserts, backdrop, layout, problems, notes)
     fit = f"fps={SAMPLE_FPS},scale={SMALL_W}:{SMALL_H},format=gray"
     # 1) где стоят буквы: субтитры рисуются на чёрном фоне, поэтому видны на любом фоне видео
     # Для маски все цвета букв заменяются белым: тёмный текст на чёрном фоне иначе не виден
-    ass_text = open(os.path.join(workdir, "subs.ass"), encoding="utf-8").read()
-    ass_text = re.sub(r"\\1c&H[0-9A-Fa-f]{6,8}&?", r"\\1c&HFFFFFF&", ass_text)
-    ass_text = re.sub(r"^(Style: [^\n]*?),&H[0-9A-Fa-f]{8},&H[0-9A-Fa-f]{8},", r"\1,&H00FFFFFF,&H00FFFFFF,", ass_text, flags=re.M)
-    write_text(os.path.dirname(os.path.dirname(workdir)), os.path.join(workdir, "subs-mask.ass"), ass_text)
-    mask_args = ["-f", "lavfi", "-i", f"color=c=black:s={W}x{H}:r=30:d={duration:.2f}",
-                 "-vf", f"ass=filename=subs-mask.ass:fontsdir=fonts,{fit}"]
+    if layout.get("engine") == "hyperframes" and re.fullmatch(r"afisha-hf/run-\d+/front-frames/frame_%06d\.png", str(layout.get("hf_front"))):
+        # Афиша через HyperFrames: надписи перед человеком лежат отдельным слоем с прозрачностью, яркость = непрозрачность буквы
+        # (слово-тема за человеком слой «behind», лицо оно по определению не закрывает и здесь не проверяется)
+        mask_args = ["-framerate", "30", "-i", layout["hf_front"],
+                     "-vf", f"fps={SAMPLE_FPS},scale={SMALL_W}:{SMALL_H},format=rgba,alphaextract,format=gray"]
+    else:
+        ass_text = open(os.path.join(workdir, "subs.ass"), encoding="utf-8").read()
+        ass_text = re.sub(r"\\1c&H[0-9A-Fa-f]{6,8}&?", r"\\1c&HFFFFFF&", ass_text)
+        ass_text = re.sub(r"^(Style: [^\n]*?),&H[0-9A-Fa-f]{8},&H[0-9A-Fa-f]{8},", r"\1,&H00FFFFFF,&H00FFFFFF,", ass_text, flags=re.M)
+        write_text(os.path.dirname(os.path.dirname(workdir)), os.path.join(workdir, "subs-mask.ass"), ass_text)
+        mask_args = ["-f", "lavfi", "-i", f"color=c=black:s={W}x{H}:r=30:d={duration:.2f}",
+                     "-vf", f"ass=filename=subs-mask.ass:fontsdir=fonts,{fit}"]
     text_boxes = [bright_boxes(f, TEXT_LEVEL, 1) for f in gray_frames(mask_args, workdir)]
     # 2) вставки-картинки: видны как разница между чистым кадром и итогом
     insert_boxes = [[] for _ in text_boxes]

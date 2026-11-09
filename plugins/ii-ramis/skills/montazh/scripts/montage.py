@@ -14,6 +14,7 @@ import sys
 
 import math
 
+import afisha_hf
 import layouts
 from common import H, SAFE, W, clean_face, copy_fonts, limit_count, write_bytes, ffmpeg_ok, ffmpeg_text, inside, load_json, media_file, need, number, own_output, probe, require_no_links, write_text
 
@@ -134,7 +135,7 @@ def make_cards(plan, segments):
     for card in plan.get("cards", []):
         interval = map_interval(float(card["s"]), float(card["e"]), segments)
         if interval:
-            fields = {key: card.get(key, "") for key in ("text", "accent", "theme", "main", "over", "hand")}
+            fields = {key: card.get(key, "") for key in ("text", "accent", "theme", "main", "over", "hand", "strike", "hand_below")}
             mapped.append({"s": interval[0], "e": interval[1], **fields})
     mapped.sort(key=lambda c: c["s"])
     for current, following in zip(mapped, mapped[1:]):  # одна строка за раз, без «призраков»
@@ -294,16 +295,32 @@ def build(project, plan_path):
     use_mask = style_plan.get("preset") == "afisha" and os.path.isfile(mask_file) and not windows and not plan.get("inserts")
     if style_plan.get("preset") == "afisha" and not use_mask:
         print("Маски человека нет: слово-тема «Афиши» встанет над головой, а не за ней (маска: nabor/references/ustanovka.md, «Маска человека»).")
-    write_text(project, os.path.join(workdir, "subs.ass"), build_ass(cards, style_plan, windows, plan.get("face"), use_mask, "front"))
-    if use_mask:
-        write_text(project, os.path.join(workdir, "subs-behind.ass"), build_ass(cards, style_plan, windows, plan.get("face"), True, "behind"))
     copy_fonts(project, FONTS_SRC, os.path.join(workdir, "fonts"))
+    hf = None
+    if use_mask and style_plan.get("engine", "auto") != "ass" and afisha_hf.hf_available():
+        try:  # Афиша как у Монтажки: два слоя HyperFrames; не получилось, ниже запасной путь на ASS
+            hf = afisha_hf.prepare(project, workdir, cards, segments, words, style_plan, float(probe(base)["format"]["duration"]))
+        except afisha_hf.HFError as error:
+            print(f"Афиша через HyperFrames не вышла ({error}). Собираю запасным путём (субтитры ASS).")
+    elif style_plan.get("preset") == "afisha" and use_mask:
+        reason = "выбран запасной путь (style.engine: ass)" if style_plan.get("engine") == "ass" else "HyperFrames (Node 22+) не найден"
+        print(f"{reason}: Афиша соберётся субтитрами ASS, без побуквенного проявления и свечения.")
+    if not hf:
+        write_text(project, os.path.join(workdir, "subs.ass"), build_ass(cards, style_plan, windows, plan.get("face"), use_mask, "front"))
+        if use_mask:
+            write_text(project, os.path.join(workdir, "subs-behind.ass"), build_ass(cards, style_plan, windows, plan.get("face"), True, "behind"))
     mix = mix_audio(project, plan, workdir, base)
+    if hf:
+        afisha_hf.add_sfx(project, workdir, hf)
     loudness = loudnorm_filter(measure_loudness(mix))
     split_inputs, split_graph, last = layouts.split_graph(windows, "vs", 1)
     insert_inputs, graph, last = inserts_chain(project, plan, segments, last, split_inputs.count("-i") + 1)
     extra_inputs = split_inputs + insert_inputs
-    if use_mask:
+    if hf:
+        hf_inputs, hf_graph = afisha_hf.inputs_and_graph(hf, extra_inputs.count("-i") + 1)
+        extra_inputs = extra_inputs + hf_inputs
+        video_graph = hf_graph
+    elif use_mask:
         mask_slot = extra_inputs.count("-i") + 1
         extra_inputs = extra_inputs + ["-i", "mask.mp4"]
         video_graph = ["[0:v]null[vs]"] + split_graph + graph + [
@@ -325,6 +342,9 @@ def build(project, plan_path):
     cut_plan = json.dumps({"segments": segments, "cards": cards, "splits": [
             {"a": w["a"], "b": w["b"], "seam": w["seam"], "y0": w["y0"]} for w in windows],
             "preset": plan.get("style", {}).get("preset", "classic"),
+            "engine": "hyperframes" if hf else "ass",
+            "hf_center": hf["center"] if hf else None,
+            "hf_front": hf["front"] if hf else None,
             "text_color": plan.get("style", {}).get(
                 "text", "#F3EBDD" if plan.get("style", {}).get("preset") == "afisha" else "#FFFFFF"),
             "main_color": plan.get("style", {}).get("main", plan.get("style", {}).get("text", "#F3EBDD")),
