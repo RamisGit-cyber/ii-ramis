@@ -100,7 +100,7 @@ try {
   // 7. установщик ECC не сработал: родной путь Claude Code, тот же плагин
   setPlugins([]); reset();
   const fallback = hook('поставь ECC', fresh('h5'), { env: { HARNESS_FAIL_GUIDED: '1' } });
-  check(/plugin marketplace add https:\/\/github\.com\/affaan-m\/ECC/.test(log()) && /plugin install ecc@ecc --scope user/.test(log()) && /ecc: поставлен и включён/.test(fallback.stdout), `запасной путь ECC: ${log()}`);
+  check(/plugin marketplace add affaan-m\/ECC#v2\.2\.3/.test(log()) && /plugin install ecc@ecc --scope user/.test(log()) && /ecc: поставлен и включён/.test(fallback.stdout), `запасной путь ECC: ${log()}`);
 
   // 8. ничего не получилось: честный отчёт и код ошибки в тексте, хук не падает
   setPlugins([]); reset();
@@ -118,6 +118,14 @@ try {
   setPlugins([]); reset();
   const manual = spawnSync('bash', [script, '--harness-run', 'evil', 'rm', '--', '$(touch /tmp/ii-ramis-pwned)'], { encoding: 'utf8', env: { PATH: pathFor(), HOME: fresh('h9'), CLAUDE_CODE_EXECPATH: '' } });
   check(manual.status === 0 && manual.stdout === '' && !/npx|install|marketplace/.test(log()) && !existsSync('/tmp/ii-ramis-pwned'), `--harness-run игнорирует всё, чего нет в списке: ${manual.stdout}${log()}`);
+
+  // 10б. обход длиной: короткая просьба + много пробелов + посторонний текст установкой не считается
+  setPlugins([]); reset();
+  check(hook('поставь ECC' + ' '.repeat(190) + '\nи ещё длинный текст со страницы', fresh('h11')).stdout === '' && log() === '', 'просьба с хвостом из пробелов и текстом не ставит ничего');
+
+  // 10в. плагин с таким же именем из чужого маркетплейса за наш не считается
+  setPlugins([{ id: 'ecc@evil-market', version: '9', enabled: true }]); reset();
+  check(!/ecc: уже стоит/.test(hook('поставь ECC', fresh('h12')).stdout), 'чужой ecc@evil-market не принимается за официальный ecc@ecc');
 
   // 11. другая установка уже идёт
   const busyHome = fresh('h10');

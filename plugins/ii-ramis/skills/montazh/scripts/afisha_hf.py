@@ -317,7 +317,8 @@ def hf_env(neutral):
     """Окружение для npx: официальный реестр, пустые пользовательские и системные настройки npm, без статистики."""
     empty_config = Path(neutral) / "empty-npm-config"
     empty_config.write_text("", encoding="utf-8")
-    env = {name: value for name, value in os.environ.items() if not name.upper().startswith("NPM_CONFIG_")}
+    dropped = ("NODE_OPTIONS", "NODE_PATH")  # чужой код в процессе node
+    env = {name: value for name, value in os.environ.items() if not name.upper().startswith("NPM_CONFIG_") and name.upper() not in dropped}
     env.update({
         "NPM_CONFIG_REGISTRY": "https://registry.npmjs.org/", "NPM_CONFIG_USERCONFIG": str(empty_config),
         "NPM_CONFIG_GLOBALCONFIG": str(empty_config), "NPM_CONFIG_UPDATE_NOTIFIER": "false",

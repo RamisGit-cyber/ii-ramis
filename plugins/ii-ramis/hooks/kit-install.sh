@@ -40,6 +40,7 @@ TEARDOWN_SHA="a91262ac1109051e014662d42ecb0b7bc1f113b1" # elvarofficial/teardown
 ANATOMY_SHA="1482e8469b0a9e0d8cc18ea2740a01423d29ae80" # wheresryan22/anatomy (MIT), коммит от 18.10.2026
 EARSHOT_SHA="591fa3e028032e6dce56620a20e932e35667e8d8" # Leonxlnx/earshot (MIT), тег v0.4.0; ставится только по «да» ученика (режим --earshot), не хуком
 CF_AUDIT_SHA="c1c8a8c1471069fb0e188eeaff69b8e8db6564a8" # cloudflare/security-audit-skill (MIT), коммит от 14.09.2026 (проверен 09.11.2026)
+ECC_MARKETPLACE="affaan-m/ECC#v2.2.3" # запасной путь: маркетплейс закреплён на теге v2.2.3 (c05b2d6, проверено командой marketplace add и по списку маркетплейсов)
 ECC_NPM="ecc-universal@2.2.3" # официальный установщик ECC (affaan-m/ECC, MIT); плагин ecc@ecc, режим хуков standard
 PYTORCH_CPU_INDEX="https://download.pytorch.org/whl/cpu"
 GAMEDEV_SHA="19d93f97c9c1ea0f8b306e77aa81e0d3e352d3e9" # gamedev-skills/awesome-gamedev-agent-skills (Apache-2.0), коммит от 28.10.2026
@@ -97,7 +98,7 @@ emit() { # сообщение ученику, контекст для Claude (о
 # Быстрый синхронный хук: только сообщает, что набор ставится. Ничего не устанавливает.
 notice_mode() {
   need_install || return 0
-  emit "ИИ Рамис ставит инструменты уроков и новые навыки в фоне (2–5 минут, вводить ничего не нужно). Не хочешь: напиши «не ставь набор»." "ИИ Рамис: хук ставит набор $KIT_VERSION в фоне вне песочницы. Скажи ученику одной строкой, что ставится и как отказаться (отказ «не ставь набор» запишет хук сам, файлы не пиши: установка остановится на следующем шаге). Саму установку Bash-командами не запускай: Bash в песочнице не может писать в ~/.claude."
+  emit "ИИ Рамис ставит новые навыки и инструменты в фоне (2–5 минут, вводить ничего не нужно). Не хочешь: напиши «не ставь набор»." "ИИ Рамис: хук ставит набор $KIT_VERSION в фоне вне песочницы. Скажи ученику одной строкой, что ставится и как отказаться (отказ «не ставь набор» запишет хук сам, файлы не пиши: установка остановится на следующем шаге). Саму установку Bash-командами не запускай: Bash в песочнице не может писать в ~/.claude."
 }
 
 # Асинхронный хук (async: true): сам ставит набор, по завершении сообщает Claude на следующем ходу.
@@ -409,9 +410,9 @@ console.log(ask?'yes':'no')}catch(e){console.log('no')}})" 2>/dev/null)"
 # Хук UserPromptSubmit приложение выполняет вне песочницы, поэтому здесь можно писать в ~/.claude (команды Bash у Claude на это прав не имеют).
 # Strix сюда НЕ входит: он активно «атакует» сайт, ставится только по явному «да» после объяснения (навык bezopasnost).
 
-# enabled|disabled|absent|unknown и версия плагина по id (без @маркетплейса)
+# enabled|disabled|absent|unknown и версия плагина по полному id (имя@маркетплейс: чужой маркетплейс за наш не сойдёт)
 plugin_status() { # путь-к-claude id
-  "$1" plugin list --json 2>/dev/null | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{const p=JSON.parse(d).find(x=>String(x.id).startsWith(process.argv[1]+"@"));console.log(p?(p.enabled===false?"disabled":"enabled")+" "+String(p.version).replace(/[^0-9a-zA-Z.-]/g,"").slice(0,20):"absent")}catch(e){console.log("unknown")}})' "$2" 2>/dev/null
+  "$1" plugin list --json 2>/dev/null | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{const p=JSON.parse(d).find(x=>x.id===process.argv[1]);console.log(p?(p.enabled===false?"disabled":"enabled")+" "+String(p.version).replace(/[^0-9a-zA-Z.-]/g,"").slice(0,20):"absent")}catch(e){console.log("unknown")}})' "$2" 2>/dev/null
 }
 
 skill_present() { local d; for d in "$HOME/.claude/skills/$1" "$HOME/.claude/skills/synced"/*/"$1"; do [ -f "$d/SKILL.md" ] && return 0; done; return 1; }
@@ -420,30 +421,30 @@ skill_present() { local d; for d in "$HOME/.claude/skills/$1" "$HOME/.claude/ski
 limited() { local sec="$1"; shift; if command -v timeout >/dev/null 2>&1; then timeout "$sec" "$@"; elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$sec" "$@"; else "$@"; fi; }
 
 # Плагин установлен и включён? Выключенный включаем (ученик попросил поставить).
-harness_verify_plugin() { # claude id маркетплейс
+harness_verify_plugin() { # claude полный-id (имя@маркетплейс)
   local st
   st="$(plugin_status "$1" "$2")"
   case "$st" in
-    disabled*) limited 60 "$1" plugin enable "$2@$3" >/dev/null 2>&1; st="$(plugin_status "$1" "$2")" ;;
+    disabled*) limited 60 "$1" plugin enable "$2" >/dev/null 2>&1; st="$(plugin_status "$1" "$2")" ;;
   esac
   case "$st" in enabled*) return 0 ;; *) return 1 ;; esac
 }
 
 harness_superpowers() { # claude
   local c="$1" st
-  st="$(plugin_status "$c" superpowers)"
+  st="$(plugin_status "$c" superpowers@claude-plugins-official)"
   case "$st" in enabled*) echo "superpowers: уже стоит и включён (${st#enabled })"; return 0 ;; esac
   case "$st" in disabled*) ;; *)
     limited 90 "$c" plugin marketplace add anthropics/claude-plugins-official >/dev/null 2>&1
     limited 180 "$c" plugin install superpowers@claude-plugins-official >/dev/null 2>&1 ;;
   esac
-  if harness_verify_plugin "$c" superpowers claude-plugins-official; then echo "superpowers: поставлен и включён ($(plugin_status "$c" superpowers | cut -d' ' -f2))"
+  if harness_verify_plugin "$c" superpowers@claude-plugins-official; then echo "superpowers: поставлен и включён ($(plugin_status "$c" superpowers@claude-plugins-official | cut -d' ' -f2))"
   else echo "superpowers: НЕ ПОСТАВИЛСЯ (команда claude plugin install superpowers@claude-plugins-official не прошла)"; return 1; fi
 }
 
 harness_ecc() { # claude
   local c="$1" st tmp major
-  st="$(plugin_status "$c" ecc)"
+  st="$(plugin_status "$c" ecc@ecc)"
   case "$st" in enabled*) echo "ecc: уже стоит и включён (${st#enabled })"; return 0 ;; esac
   if ! command -v node >/dev/null 2>&1 || ! command -v git >/dev/null 2>&1; then echo "ecc: НЕ ПОСТАВИЛСЯ (нужны Node.js 18 или новее и git; скажи ученику, как их поставить по разделу про Node и git навыка nabor)"; return 1; fi
   major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null)"
@@ -456,14 +457,14 @@ harness_ecc() { # claude
     ( cd "$tmp" && limited 420 npx --yes "$ECC_NPM" install --guided --harness claude --claude-scope user --claude-hooks standard --yes >/dev/null 2>&1 )
     rm -rf "$tmp" 2>/dev/null
     # Не получилось установщиком: родной путь Claude Code из того же README (тот же плагин ecc@ecc, не второй способ поверх)
-    if ! harness_verify_plugin "$c" ecc ecc; then
-      case "$(plugin_status "$c" ecc)" in absent|unknown)
-        limited 120 "$c" plugin marketplace add https://github.com/affaan-m/ECC >/dev/null 2>&1
+    if ! harness_verify_plugin "$c" ecc@ecc; then
+      case "$(plugin_status "$c" ecc@ecc)" in absent|unknown)
+        limited 120 "$c" plugin marketplace add "$ECC_MARKETPLACE" >/dev/null 2>&1
         limited 240 "$c" plugin install ecc@ecc --scope user >/dev/null 2>&1 ;;
       esac
     fi ;;
   esac
-  if harness_verify_plugin "$c" ecc ecc; then echo "ecc: поставлен и включён ($(plugin_status "$c" ecc | cut -d' ' -f2)), режим хуков Standard"
+  if harness_verify_plugin "$c" ecc@ecc; then echo "ecc: поставлен и включён ($(plugin_status "$c" ecc@ecc | cut -d' ' -f2)), режим хуков Standard"
   else echo "ecc: НЕ ПОСТАВИЛСЯ (npx ecc-universal install --guided не прошёл, родная установка тоже)"; return 1; fi
 }
 
@@ -494,14 +495,16 @@ harness_install() {
     echo "ИИ Рамис (хук): ученик просит поставить харнесы, но команда claude не найдена. Скажи честно: поставить можно через меню плагинов приложения (Manage plugins, маркетплейс claude-plugins-official, Superpowers; для ECC маркетплейс affaan-m/ECC), потом полностью перезапустить приложение."
     return 0
   fi
-  # одна установка за раз; замок старше 15 минут считается брошенным
-  if [ -d "$lock" ] && [ -z "$(find "$lock" -maxdepth 0 -mmin +15 2>/dev/null)" ]; then
+  # одна установка за раз; замок старше 30 минут считается брошенным
+  if [ -d "$lock" ] && [ -z "$(find "$lock" -maxdepth 0 -mmin +30 2>/dev/null)" ]; then
     echo "ИИ Рамис (хук): установка харнесов уже идёт, скажи ученику подождать пару минут."
     return 0
   fi
   rmdir "$lock" 2>/dev/null
   mkdir "$lock" 2>/dev/null || return 0
   trap 'rmdir "$STATE_DIR/harness.lock" 2>/dev/null' EXIT
+  # настройки npm ученика (~/.npmrc: чужие реестры, токены) не подмешиваем
+  export NPM_CONFIG_USERCONFIG=/dev/null NPM_CONFIG_GLOBALCONFIG=/dev/null
   for item in "$@"; do
     case "$seen" in *" $item "*) continue ;; esac
     seen="$seen$item "
@@ -528,7 +531,8 @@ harness_on_prompt_mode() {
   command -v node >/dev/null 2>&1 || return 0
   want="$(printf '%s' "$raw" | node -e '
 let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{
-const p=String(JSON.parse(d).prompt||"").toLowerCase().replace(/ё/g,"е").replace(/[«»"]/g,"").trim().slice(0,200);
+const p=String(JSON.parse(d).prompt||"").toLowerCase().replace(/ё/g,"е").replace(/[«»"]/g,"").trim();
+if(p.length>200){console.log("");return}
 const m=p.match(/^(?:пожалуйста,?\s*)?(?:поставь|установи|поставить|установить)(?:\s+мне)?\s+(.+?)\s*[.!]?$/);
 if(!m){console.log("");return}
 const obj=m[1];

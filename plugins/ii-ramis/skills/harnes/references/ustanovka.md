@@ -6,7 +6,7 @@
 
 | Что | Источник | Лицензия | Как ставится |
 |---|---|---|---|
-| ECC (`ecc@ecc`) | github.com/affaan-m/ECC, npm `ecc-universal@2.2.3` | MIT | официальный установщик из README («Install ECC»): `npx ecc-universal@2.2.3 install --guided --harness claude --claude-scope user --claude-hooks standard --yes` (все выборы заданы явно, без вопросов). Запасной путь из того же README: `claude plugin marketplace add https://github.com/affaan-m/ECC` и `claude plugin install ecc@ecc --scope user` |
+| ECC (`ecc@ecc`) | github.com/affaan-m/ECC, npm `ecc-universal@2.2.3` | MIT | официальный установщик из README («Install ECC»): `npx ecc-universal@2.2.3 install --guided --harness claude --claude-scope user --claude-hooks standard --yes` (все выборы заданы явно, без вопросов). Запасной путь из того же README: `claude plugin marketplace add affaan-m/ECC#v2.2.3` (маркетплейс закреплён на теге v2.2.3, проверено) и `claude plugin install ecc@ecc --scope user` |
 | Superpowers | github.com/obra/superpowers, маркетплейс `claude-plugins-official` | MIT | `claude plugin marketplace add anthropics/claude-plugins-official` и `claude plugin install superpowers@claude-plugins-official` |
 | security-audit | github.com/cloudflare/security-audit-skill, коммит c1c8a8c1 | MIT | клон на коммите + `npx skills@1.7.6 add <папка> --skill security-audit -g -a claude-code -y --copy` |
 
@@ -45,7 +45,7 @@ if ($want -contains 'ecc') {
       npx.cmd --yes ecc-universal@2.2.3 install --guided --harness claude --claude-scope user --claude-hooks standard --yes *> $null
       Pop-Location; Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
       if ((Plugin-State 'ecc') -eq 'absent') {
-        claude plugin marketplace add https://github.com/affaan-m/ECC *> $null
+        claude plugin marketplace add 'affaan-m/ECC#v2.2.3' *> $null
         claude plugin install ecc@ecc --scope user *> $null
       }
     }
