@@ -17,13 +17,14 @@ const check = (ok, message) => { if (!ok) failures.push(message); };
 
 const received = [];
 let respondWith = 201;
+let responseDelayMs = 0;
 const server = createServer((req, res) => {
   let body = '';
   req.on('data', (chunk) => { body += chunk; });
   req.on('end', () => {
     received.push({ method: req.method, url: req.url, headers: req.headers, body });
     res.statusCode = respondWith;
-    res.end();
+    setTimeout(() => res.end(), responseDelayMs);
   });
 });
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -41,7 +42,7 @@ const run = (home, mode, input, extraEnv = {}) => new Promise((resolve) => {
 });
 const stop = (home, message, env) => run(home, '--stop', { hook_event_name: 'Stop', last_assistant_message: message }, env);
 const prompt = (home, text) => run(home, '--prompt', { hook_event_name: 'UserPromptSubmit', prompt: text });
-const settings = (home) => JSON.parse(readFileSync(join(home, '.ii-ramis', 'svodka.json'), 'utf8'));
+const settings = (home) => { try { return JSON.parse(readFileSync(join(home, '.ii-ramis', 'svodka.json'), 'utf8')); } catch { return {}; } };
 const good = '🗣 Что случилось: сделали страницу.\n\n📨 Сводка Рамису (урок 4, застрял: да, ошибок: 2, имя: Айдана): Собрали первую страницу сайта и выложили её в интернет. Застряли на подключении базы, получилось со второго раза.';
 
 try {
@@ -55,18 +56,20 @@ try {
   check(row.recap.startsWith('Собрали первую страницу') && row.summary?.plugin_version === '2.9.0' && row.summary?.text === row.recap, 'recap и summary должны совпадать, версия 2.7.0');
   check(!/Сводка Рамису|📨/.test(row.recap), 'служебный префикс в текст не попадает');
   check(Object.keys(row).sort().join(',') === 'errors,install_id,lesson,recap,stuck,student,summary', `лишние поля в строке: ${Object.keys(row)}`);
-  check(JSON.parse(Buffer.from(received[0].headers.apikey.split('.')[1], 'base64url')).role === 'anon' && received[0].headers.prefer === 'return=minimal', 'ключ должен быть anon, Prefer: return=minimal');
+  check(/^sb_publishable_[\w-]+$/.test(received[0].headers.apikey) && received[0].headers.authorization === undefined && received[0].headers.prefer === 'return=minimal', 'ключ sb_publishable_ только в apikey, без Authorization, Prefer: return=minimal');
   const saved = settings(home);
-  check(saved.consent === true && /^[0-9a-f-]{36}$/.test(saved.install_id) && saved.name === 'Айдана' && saved.sent_today === 1, `svodka.json после отправки: ${JSON.stringify(saved)}`);
+  check(saved.consent === undefined && /^[0-9a-f-]{36}$/.test(saved.install_id) && saved.name === 'Айдана' && saved.sent_today === 1, `svodka.json после отправки: ${JSON.stringify(saved)}`);
 
   // 2. Лимит: вторая сводка сразу не уходит
   await stop(home, good.replace('Собрали', 'Доделали'));
   check(received.length === 1, 'повторная сводка в течение 30 минут не должна уходить');
 
-  // 3. Нет строки сводки — ничего не уходит
+  // 3. Нет строки сводки и ученик отказался — ничего не уходит (пульс при отказе тоже молчит)
   const quiet = newHome();
+  mkdirSync(join(quiet, '.ii-ramis'));
+  writeFileSync(join(quiet, '.ii-ramis', 'svodka.json'), '{"consent":false}\n');
   await stop(quiet, 'Просто ответ без сводки.');
-  check(received.length === 1 && !existsSync(join(quiet, '.ii-ramis', 'svodka.json')), 'без строки «📨 Сводка Рамису» хук ничего не делает');
+  check(received.length === 1 && settings(quiet).consent === false && !('last_pulse' in settings(quiet)), 'при consent=false без строки сводки пульс не уходит');
 
   // 4. Согласие: consent=false — ничего не уходит
   const refuser = newHome();
@@ -156,6 +159,66 @@ try {
   check(oldWay.stdout !== '201' && received.length === countBeforeSandbox, `эмуляция: curl через Bash в песочнице не должен дойти (получили ${oldWay.stdout})`);
   const viaHook = await stop(newHome(), good, sandboxEnv);
   check(viaHook.code === 0 && received.length === countBeforeSandbox + 1, 'тот же запрос через хук (вне песочницы, прокси песочницы к нему не относится) должен дойти');
+  // 2б. Разметка вокруг строки; ключи с подчёркиваниями и цитаты не проходят; Node.js не режется
+  const markup = newHome();
+  const beforeMarkup = received.length;
+  await stop(markup, '**📨 Сводка Рамису (урок 4, имя: Лада):** Поставили Node.js и запустили первую страницу сайта.**');
+  check(received.length === beforeMarkup + 1 && JSON.parse(received.at(-1).body).recap.startsWith('Поставили Node и запустили'), 'разметка вокруг строки сводки и Node.js должны проходить');
+  const leaky = newHome();
+  await stop(leaky, '📨 Сводка Рамису (урок 4): Положили ключ sk_live_51Hh8abcdEFGH12345678 в настройки сайта.');
+  await stop(newHome(), '📨 Сводка Рамису (урок 4): Токен a_b_c_d_e_f_g_h_i_j_k_l_m_n_o_p_q_r_s_t_u лежит в настройках.');
+  await stop(newHome(), '> 📨 Сводка Рамису (урок 4): Это цитата из чужого файла и она не сводка.');
+  check(received.length === beforeMarkup + 1, 'ключи с подчёркиваниями и цитаты в сводку не попадают');
+
+  // 6. Пульс: тихая отметка без текста
+  const stopWithSession = (home, message, sessionId) => run(home, '--stop', { hook_event_name: 'Stop', session_id: sessionId, last_assistant_message: message });
+  const pulseHome = newHome();
+  const pulseBase = received.length;
+  const pulseRun = await stopWithSession(pulseHome, 'Просто ответ без сводки.', 'sess-1');
+  check(pulseRun.code === 0 && pulseRun.out === '', 'пульс ничего не печатает ученику');
+  const pulseRow = received.length === pulseBase + 1 ? JSON.parse(received.at(-1).body) : null;
+  check(pulseRow?.kind === 'pulse' && pulseRow.stuck === false && /^[0-9a-f-]{36}$/.test(pulseRow.install_id) && pulseRow.summary?.plugin_version === '2.9.0', `пульс уходит без строки сводки: ${received.at(-1)?.body}`);
+  check(pulseRow && Object.keys(pulseRow).sort().join(',') === 'install_id,kind,stuck,student,summary' && Object.keys(pulseRow.summary).sort().join(',') === 'at,kind,plugin_version', `в пульсе только служебные поля: ${Object.keys(pulseRow ?? {})}`);
+  await stopWithSession(pulseHome, 'Ещё один ответ.', 'sess-2');
+  check(received.length === pulseBase + 1, 'второй пульс раньше чем через 30 минут не уходит');
+  const old = settings(pulseHome);
+  writeFileSync(join(pulseHome, '.ii-ramis', 'svodka.json'), JSON.stringify({ ...old, last_pulse: new Date(Date.now() - 31 * 60 * 1000).toISOString() }) + '\n');
+  await stopWithSession(pulseHome, 'Ещё один ответ.', 'sess-1');
+  check(received.length === pulseBase + 1, 'в той же сессии пульс не повторяется');
+  await stopWithSession(pulseHome, 'Ещё один ответ.', 'sess-3');
+  check(received.length === pulseBase + 2, 'через 30 минут пульс снова уходит');
+  // сводка в этой же сессии: пульс не дублирует
+  const both = newHome();
+  const bothBase = received.length;
+  await stopWithSession(both, good, 'sess-9');
+  await stopWithSession(both, 'Ответ без сводки.', 'sess-9');
+  check(received.length === bothBase + 1 && JSON.parse(received.at(-1).body).kind === undefined, 'после сводки в той же сессии пульс не дублируется');
+  // отброшенная сводка пульсом не заменяется
+  const rejectedBase = received.length;
+  await stopWithSession(newHome(), '📨 Сводка Рамису (урок 4): Положили ключ sk_live_51Hh8abcdEFGH12345678 в настройки.', 'sess-5');
+  check(received.length === rejectedBase, 'отброшенная сводка не превращается в пульс');
+  // битый файл и согласие не булевым значением: не отправляем ни сводку, ни пульс
+  for (const [label, content] of [['битый файл', '{не json'], ['consent строкой', '{"consent":"false"}']]) {
+    const broken = newHome();
+    mkdirSync(join(broken, '.ii-ramis'));
+    writeFileSync(join(broken, '.ii-ramis', 'svodka.json'), content);
+    const brokenBase = received.length;
+    await stopWithSession(broken, good, 'sess-b');
+    await stopWithSession(broken, 'Ответ без сводки.', 'sess-c');
+    check(received.length === brokenBase, `${label}: ни сводка, ни пульс не уходят`);
+  }
+  // гонка: отказ, записанный за время отправки, не затирается ни пульсом, ни сводкой
+  for (const [label, message] of [['пульс', 'Ответ без сводки.'], ['сводка', good]]) {
+    const racing = newHome();
+    responseDelayMs = 600;
+    const pending = stopWithSession(racing, message, 'sess-r');
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    mkdirSync(join(racing, '.ii-ramis'), { recursive: true });
+    writeFileSync(join(racing, '.ii-ramis', 'svodka.json'), '{"consent":false}\n');
+    await pending;
+    responseDelayMs = 0;
+    check(JSON.stringify(settings(racing)) === '{"consent":false}', `${label}: отказ, записанный во время отправки, должен сохраниться: ${JSON.stringify(settings(racing))}`);
+  }
   denyProxy.close();
 } finally {
   server.close();
