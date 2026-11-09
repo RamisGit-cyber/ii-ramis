@@ -36,6 +36,7 @@ show impeccable has_skill impeccable
 show hyperframes has_skill hyperframes
 show remotion has_skill remotion-best-practices
 show gsap has_skill gsap-core
+show security-audit has_skill security-audit
 show apple-design has_skill apple-design
 show ffmpeg-skill has_skill ffmpeg-skill
 show teardown has_skill teardown
@@ -108,6 +109,7 @@ Show 'impeccable' (Has-Skill 'impeccable')
 Show 'hyperframes' (Has-Skill 'hyperframes')
 Show 'remotion' (Has-Skill 'remotion-best-practices')
 Show 'gsap' (Has-Skill 'gsap-core')
+Show 'security-audit' (Has-Skill 'security-audit')
 Show 'apple-design' (Has-Skill 'apple-design')
 Show 'ffmpeg-skill' (Has-Skill 'ffmpeg-skill')
 Show 'teardown' (Has-Skill 'teardown')
@@ -194,6 +196,17 @@ else {
   if ($links.Count -gt 0) { Fail 'gsap' 'в репозитории есть символические ссылки'; $gdir = $null }
   if ($gdir) { npx.cmd --yes $SkillsCli add $gdir --skill gsap-core gsap-frameworks gsap-performance gsap-plugins gsap-react gsap-scrolltrigger gsap-timeline gsap-utils -g -a claude-code -y --copy *> $null
     if (Has-Skill 'gsap-core') { Done 'gsap' } else { Fail 'gsap' 'нужны git и Node 22.20 или новее' } }
+}
+
+# Cloudflare security-audit (MIT, урок 7): навык глубокой проверки безопасности на закреплённом коммите
+if (Has-Skill 'security-audit') { Ok 'security-audit' }
+else {
+  $sdir = Join-Path $Work 'security-audit'
+  if (-not (Git-Pinned 'https://github.com/cloudflare/security-audit-skill.git' 'c1c8a8c1471069fb0e188eeaff69b8e8db6564a8' $sdir)) { Fail 'security-audit' 'не скачалось на закреплённом коммите'; $sdir = $null }
+  $slinks = @(); if ($sdir) { $slinks = @(Get-ChildItem -LiteralPath $sdir -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and $_.FullName -notmatch '[\\/]\.git[\\/]' }) }
+  if ($slinks.Count -gt 0) { Fail 'security-audit' 'в репозитории есть символические ссылки'; $sdir = $null }
+  if ($sdir) { npx.cmd --yes $SkillsCli add $sdir --skill security-audit -g -a claude-code -y --copy *> $null
+    if (Has-Skill 'security-audit') { Done 'security-audit' } else { Fail 'security-audit' 'нужны git и Node 22.20 или новее' } }
 }
 
 # HyperFrames: основной набор навыков от HeyGen из клона на закреплённом коммите

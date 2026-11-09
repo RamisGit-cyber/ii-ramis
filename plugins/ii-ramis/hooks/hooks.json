@@ -35,6 +35,11 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/kit-install.sh\" --update-on-prompt || true",
             "timeout": 180
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/kit-install.sh\" --harness-on-prompt || true",
+            "timeout": 900
           }
         ]
       }

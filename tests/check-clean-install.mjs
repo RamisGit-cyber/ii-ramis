@@ -48,7 +48,7 @@ try {
   const firstJson = lastJson(first.stdout);
   check(/Набор инструментов поставлен/.test(firstJson.systemMessage ?? ''), `--auto: после установки нет сообщения «поставлен»: ${first.stdout}`);
   const marker = state(home);
-  check(marker.status === 'ok' && marker.kit === '2.7.2' && marker.tries === 1, `nabor.json после первой установки: ${JSON.stringify(marker)}`);
+  check(marker.status === 'ok' && marker.kit === '2.9.0' && marker.tries === 1, `nabor.json после первой установки: ${JSON.stringify(marker)}`);
   check(/21st/.test(marker.notes), 'notes должны сказать, что 21st ждёт ключ');
   check(!existsSync(join(home, '.ii-ramis', 'nabor.lock')), 'замок установки не снят');
 
@@ -95,7 +95,7 @@ try {
   // ---------- 4. Отказ «не ставь набор» ----------
   const refuser = newHome('declined');
   mkdirSync(join(refuser, '.ii-ramis'));
-  writeFileSync(join(refuser, '.ii-ramis', 'nabor.json'), '{"kit":"2.7.2","status":"declined"}\n');
+  writeFileSync(join(refuser, '.ii-ramis', 'nabor.json'), '{"kit":"2.9.0","status":"declined"}\n');
   check(kit(refuser, '--notice').stdout.trim() === '' && kit(refuser, '--auto').stdout.trim() === '', 'при declined хуки должны молчать');
   const declinedRun = kit(refuser, '--run');
   check(/отказ ученика/.test(declinedRun.stdout), '--run при declined должен пропускать установку');
@@ -108,10 +108,10 @@ try {
   const upgrader = newHome('upgrade');
   mkdirSync(join(upgrader, '.ii-ramis'));
   writeFileSync(join(upgrader, '.ii-ramis', 'nabor.json'), '{"kit":"2.4.0","lesson":5,"status":"ok","tries":1}\n');
-  check(/ставит новые навыки и инструменты/.test(kit(upgrader, '--notice').stdout), 'с 2.4.0 набор 2.7.2 должен докачиваться');
+  check(/ставит новые навыки и инструменты/.test(kit(upgrader, '--notice').stdout), 'с 2.4.0 набор 2.9.0 должен докачиваться');
   const exhausted = newHome('tries');
   mkdirSync(join(exhausted, '.ii-ramis'));
-  writeFileSync(join(exhausted, '.ii-ramis', 'nabor.json'), '{"kit":"2.7.2","lesson":5,"status":"partial","tries":3,"missing":"agent-reach","notes":"uv"}\n');
+  writeFileSync(join(exhausted, '.ii-ramis', 'nabor.json'), '{"kit":"2.9.0","lesson":5,"status":"partial","tries":3,"missing":"agent-reach","notes":"uv"}\n');
   check(kit(exhausted, '--notice').stdout.trim() === '' && kit(exhausted, '--auto').stdout.trim() === '', 'после 3 неудачных попыток хук сам не повторяет');
 
   // ---------- 6. Эмуляция песочницы ----------
@@ -153,4 +153,4 @@ if (failures.length > 0) {
   console.error(failures.map((line) => `FAIL: ${line}`).join('\n'));
   process.exit(1);
 }
-console.log('OK: набор 2.7 ставится скриптом хука, повтор ничего не дублирует, отказ и песочница обработаны');
+console.log('OK: набор 2.9 ставится скриптом хука, повтор ничего не дублирует, отказ и песочница обработаны');

@@ -1,6 +1,6 @@
 // Безопасность загрузки шрифтов и модели Афиши (2.8.0): только https, без цифровых адресов, сверка SHA256,
 // распаковка без выхода из папки, лишние файлы и ссылки отказывают. Сеть не нужна. Нужен python3.
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync, readFileSync, realpathSync, chmodSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -75,6 +75,31 @@ open(${JSON.stringify(join(base, 'notzip.zip'))}, 'wb').write(b'not a zip')
   check(http.status !== 0 && !existsSync(join(home, 'fonts')), 'install_fonts.py: http-ссылка должна отказывать');
   const status = spawnSync('python3', [join(scripts, 'install_fonts.py'), '--check'], { encoding: 'utf8', env: { ...process.env, II_RAMIS_HOME: home } });
   check(status.status === 0 && status.stdout.includes('"all": false'), 'install_fonts.py --check: без шрифтов должно быть all=false');
+
+  // 4. HyperFrames (npx) запускается не из папки проекта ученика, а из пустой временной, с официальным реестром и пустыми настройками npm
+  const project = join(base, 'student-project');
+  const layer = join(project, 'afisha-hf', 'behind');
+  mkdirSync(layer, { recursive: true });
+  writeFileSync(join(project, 'package.json'), '{"name":"evil"}');
+  const fakeBin = join(base, 'fakebin');
+  mkdirSync(fakeBin);
+  const record = join(base, 'npx-record.txt');
+  const fakeNpx = join(fakeBin, 'npx');
+  writeFileSync(fakeNpx, `#!/usr/bin/env bash
+{ echo "CWD=$(pwd -P)"; echo "ARGS=$*"; echo "REG=$NPM_CONFIG_REGISTRY"; echo "USERCFG=$NPM_CONFIG_USERCONFIG"; echo "GLOBALCFG=$NPM_CONFIG_GLOBALCONFIG"; echo "TEL=$HYPERFRAMES_NO_TELEMETRY$DO_NOT_TRACK"; echo "EVIL=$NPM_CONFIG_EVIL"; echo "USERCFG_SIZE=$(wc -c < "$NPM_CONFIG_USERCONFIG" | tr -d ' ')"; } > "${record}"
+while [ $# -gt 0 ]; do [ "$1" = "-o" ] && { mkdir -p "$2" && touch "$2/frame_000001.png"; }; shift; done
+`);
+  chmodSync(fakeNpx, 0o755);
+  const render = py(`import afisha_hf\nfrom pathlib import Path\nafisha_hf.render_layer(Path(${JSON.stringify(layer)}), Path(${JSON.stringify(join(project, 'afisha-hf', 'run-1', 'behind-frames'))}), print)\nprint('RENDERED')`,
+    { PATH: `${fakeBin}:${process.env.PATH}`, NPM_CONFIG_EVIL: 'x', NPM_CONFIG_REGISTRY: 'https://evil.example/' });
+  check(render.stdout.includes('RENDERED'), `render_layer с поддельным npx: ${render.stdout}${render.stderr}`);
+  const seen = existsSync(record) ? readFileSync(record, 'utf8') : '';
+  const field = (name) => (seen.match(new RegExp(`^${name}=(.*)$`, 'm')) ?? [])[1] ?? '';
+  check(field('CWD') !== '' && !field('CWD').startsWith(realpathSync(project)) && !field('CWD').startsWith(project), `npx должен запускаться вне папки проекта, а запустился в ${field('CWD')}`);
+  check(field('REG') === 'https://registry.npmjs.org/' && field('EVIL') === '', `npx: реестр официальный, чужие NPM_CONFIG_* вычищены: ${seen}`);
+  check(field('USERCFG') !== '' && field('USERCFG') === field('GLOBALCFG') && field('USERCFG_SIZE') === '0', `npx: пользовательские и системные настройки npm пустые: ${seen}`);
+  check(field('TEL') === '11', `npx: статистика HyperFrames выключена (HYPERFRAMES_NO_TELEMETRY, DO_NOT_TRACK): ${seen}`);
+  check(new RegExp(`ARGS=--yes hyperframes@0\\.9\\.19 render ${layer.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} `).test(seen), `npx: версия закреплена, путь к слою абсолютный: ${seen}`);
 } finally {
   rmSync(base, { recursive: true, force: true });
 }

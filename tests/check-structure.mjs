@@ -1,4 +1,4 @@
-// Проверка структуры плагина 2.8: манифест валиден, хуки только известные (памятка и установка набора), единственный файл кода hooks/kit-install.sh и он безопасен, у навыков есть frontmatter.
+// Проверка структуры плагина 2.9: манифест валиден, хуки только известные (памятка и установка набора), единственный файл кода hooks/kit-install.sh и он безопасен, у навыков есть frontmatter.
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,7 +26,7 @@ function readJson(file) {
 
 const manifest = readJson(join(plugin, '.claude-plugin', 'plugin.json'));
 check(manifest.name === 'ii-ramis', 'plugin.json: name должен быть ii-ramis');
-check(/^2\.8\.\d+$/.test(manifest.version ?? ''), 'plugin.json: version должен быть 2.8.x');
+check(/^2\.9\.\d+$/.test(manifest.version ?? ''), 'plugin.json: version должен быть 2.9.x');
 check(!('hooks' in manifest), 'plugin.json: не должно быть поля hooks');
 
 const marketplace = readJson(join(root, '.claude-plugin', 'marketplace.json'));
@@ -47,7 +47,7 @@ check(!JSON.stringify(hooks).includes('PreToolUse'), 'hooks.json: никаких
 check(!/svodka-send/.test(JSON.stringify(hooks.hooks?.SessionStart ?? [])) && JSON.stringify(hooks).split('command -v node').length === 3, 'hooks.json: Node нужен только хукам сводки и с проверкой, что он есть; установка набора от Node не зависит');
 check(JSON.stringify(hooks.hooks?.UserPromptSubmit ?? []).includes('reminder.txt'), 'hooks.json: UserPromptSubmit печатает reminder.txt');
 const reminder = readFileSync(join(plugin, 'hooks', 'reminder.txt'), 'utf8');
-check(reminder.includes('версия 2.8'), 'reminder.txt: версия должна совпадать с plugin.json');
+check(reminder.includes('версия 2.9'), 'reminder.txt: версия должна совпадать с plugin.json');
 check(!existsSync(join(plugin, 'scripts')), 'папки scripts быть не должно');
 const code = listFiles(plugin).filter((file) => ['.mjs', '.js', '.sh', '.ps1', '.py'].includes(extname(file)));
 const montazhScripts = ['common.py', 'transcribe.py', 'montage.py', 'critic.py', 'layouts.py', 'segment.py', 'afisha_hf.py'].map((name) => join(plugin, 'skills', 'montazh', 'scripts', name));
@@ -72,7 +72,7 @@ check(!/@latest|\bmain\b/.test(kitCode.replace(/\$\{[^}]*\}/g, '')), 'kit-instal
 check(/SKILLS_CLI="skills@1\.7\.6"/.test(kit) && /PLAYWRIGHT_MCP="@playwright\/mcp@0\.0\.84"/.test(kit) && /HYPERFRAMES_SHA="[0-9a-f]{40}"/.test(kit), 'kit-install.sh: закреплены skills, playwright, HyperFrames (коммит)');
 check(/REMOTION_SHA="[0-9a-f]{40}"/.test(kit), 'kit-install.sh: Remotion на закреплённом коммите');
 check(/releases\/download\/v1\.6\.1\/agent-reach\.zip/.test(kit) && /AR_SHA256="[0-9a-f]{64}"/.test(kit) && kit.includes('shasum -a 256'), 'kit-install.sh: Agent Reach по релизу и SHA-256');
-check([...kit.matchAll(/^\s*skill_pinned [\w./-]+ ([0-9a-f]{40}|"\$REMOTION_SHA"|"\$HYPERFRAMES_SHA"|"\$GSAP_SHA"|"\$TEARDOWN_SHA"|"\$ANATOMY_SHA"|"\$GAMEDEV_SHA") /gm)].length === 11, 'kit-install.sh: одиннадцать наборов навыков (с навыками анимации Эмила, GSAP, Teardown, Anatomy, веб-движками игр) должны ставиться из закреплённых коммитов')
+check([...kit.matchAll(/^\s*skill_pinned [\w./-]+ ([0-9a-f]{40}|"\$REMOTION_SHA"|"\$HYPERFRAMES_SHA"|"\$GSAP_SHA"|"\$TEARDOWN_SHA"|"\$ANATOMY_SHA"|"\$GAMEDEV_SHA"|"\$CF_AUDIT_SHA") /gm)].length === 12, 'kit-install.sh: двенадцать наборов навыков (с навыками анимации Эмила, GSAP, Teardown, Anatomy, веб-движками игр) должны ставиться из закреплённых коммитов')
 check(/GSAP_SHA="[0-9a-f]{40}"/.test(kit) && /skill_pinned greensock\/gsap-skills "\$GSAP_SHA"/.test(kit), 'kit-install.sh: GSAP на закреплённом коммите');
 check(['FFMPEG_SKILL_SHA', 'TEARDOWN_SHA', 'ANATOMY_SHA', 'GAMEDEV_SHA'].every((name) => new RegExp(`${name}="[0-9a-f]{40}"`).test(kit)), 'kit-install.sh: ffmpeg-skill, Teardown, Anatomy и навыки игр на закреплённых коммитах');
 check(/node "\$fdir\/bin\/install\.js" --claude/.test(kit) && /checkout -q "\$FFMPEG_SKILL_SHA"/.test(kit) && !/npx[^\n]*ffmpeg-skill/.test(kitCode), 'kit-install.sh: ffmpeg-skill ставится установщиком автора из клона на коммите, не через npx');
@@ -104,11 +104,13 @@ check(kit.includes('-type l') && kit.includes('символические ссы
 const kitBrew = [...kitCode.matchAll(/brew (install|upgrade) (\S+)/g)].map((m) => m[2]);
 check(kitBrew.every((name) => name === 'node' || name === 'ffmpeg-full') && kitBrew.length === 2, `kit-install.sh: brew только для node и ffmpeg-full (домашка урока 5), найдено: ${kitBrew.join(', ')}`);
 check(!/winget install|apt(-get)? install|\bsudo\b|curl[^\n]*\|\s*(ba)?sh|\beval\b/.test(kitCode), 'kit-install.sh: никаких winget/apt/sudo/curl|sh/eval');
-check(!/plugin marketplace add (?!anthropics\/claude-plugins-official)/.test(kitCode), 'kit-install.sh: можно добавлять только маркетплейс Anthropic');
-check([...kitCode.matchAll(/rm -rf ("[^"]*"(?: "[^"]*")*)/g)].every((m) => /^("\$LOCK"|"\$WORK" "\$LOCK")$/.test(m[1])), 'kit-install.sh: удалять можно только свой замок и свою временную папку');
+check(!/plugin marketplace add (?!anthropics\/claude-plugins-official |https:\/\/github\.com\/affaan-m\/ECC )/.test(kitCode), 'kit-install.sh: можно добавлять только маркетплейс Anthropic и официальный ECC (affaan-m/ECC)');
+check([...kitCode.matchAll(/rm -rf ("[^"]*"(?: "[^"]*")*)/g)].every((m) => /^("\$LOCK"|"\$WORK" "\$LOCK"|"\$tmp")$/.test(m[1])), 'kit-install.sh: удалять можно только свой замок и свою временную папку');
+check(/ECC_NPM="ecc-universal@2\.2\.3"/.test(kit) && /--claude-scope user --claude-hooks standard --yes/.test(kitCode) && /CF_AUDIT_SHA="[0-9a-f]{40}"/.test(kit) && !/ecc-universal@(latest|next)/.test(kit), 'kit-install.sh: ECC на закреплённой версии, режим хуков standard, аудит Cloudflare на закреплённом коммите');
+check(/--harness-on-prompt\) +harness_on_prompt_mode/.test(kit) && /--harness-run\) +shift; harness_install/.test(kit) && !/strix/i.test(kitCode.replace(/^\s*#.*$/gm, '')), 'kit-install.sh: харнесы ставятся хуком по фразе и вручную, Strix автоматикой не ставится');
 check(!/settings\.json|bypassPermissions|dangerously|allowUnsandboxed|sandbox\./i.test(kitCode), 'kit-install.sh: не трогает settings.json, разрешения и песочницу');
 check(!/21st\.dev|mcp add[^\n]*21st|claude mcp get/.test(kitCode), 'kit-install.sh: 21st не ставится скриптом (только с ключом ученика) и ключ не читается');
-check(!/curl|wget|https?:\/\//.test(kitCode.replace(/--index-url https:\/\/pypi\.org\/simple/g, '').replace(/PYTORCH_CPU_INDEX="[^"]*"/, '').replace(/"git\+https:\/\/github\.com\/Leonxlnx\/earshot@\$EARSHOT_SHA"/, '').replace(/AR_URL="[^"]*"/, '').replace(/git -c protocol\.file\.allow=never clone -q --no-recurse-submodules "https:\/\/github\.com\/\$repo\.git"/, '').replace(/"https:\/\/github\.com\/kajisho5\/ffmpeg-skill\.git"/, '').replace(/curl --proto =https --tlsv1\.2 -fsSL --max-time 120 -o "\$work\/ar\.zip" "\$AR_URL"/, '').replace(/NPM_CONFIG_REGISTRY="[^"]*"/, '').replace(/--registry https:\/\/registry\.npmjs\.org\//, '')), 'kit-install.sh: наружу ходит только скачивание Agent Reach, git clone с GitHub и npx с официального реестра');
+check(!/curl|wget|https?:\/\//.test(kitCode.replace(/--index-url https:\/\/pypi\.org\/simple/g, '').replace(/PYTORCH_CPU_INDEX="[^"]*"/, '').replace(/"git\+https:\/\/github\.com\/Leonxlnx\/earshot@\$EARSHOT_SHA"/, '').replace(/AR_URL="[^"]*"/, '').replace(/git -c protocol\.file\.allow=never clone -q --no-recurse-submodules "https:\/\/github\.com\/\$repo\.git"/, '').replace(/"https:\/\/github\.com\/kajisho5\/ffmpeg-skill\.git"/, '').replace(/"https:\/\/github\.com\/cloudflare\/security-audit-skill\.git"/, '').replace(/https:\/\/github\.com\/affaan-m\/ECC/, '').replace(/curl --proto =https --tlsv1\.2 -fsSL --max-time 120 -o "\$work\/ar\.zip" "\$AR_URL"/, '').replace(/NPM_CONFIG_REGISTRY="[^"]*"/, '').replace(/--registry https:\/\/registry\.npmjs\.org\//, '')), 'kit-install.sh: наружу ходит только скачивание Agent Reach, git clone с GitHub и npx с официального реестра');
 check(/DO_NOT_TRACK=1/.test(kit) && /HYPERFRAMES_NO_TELEMETRY=1/.test(kit), 'kit-install.sh: статистика установщика навыков и HyperFrames выключена');
 check(!/npx[^\n]*hyperframes/.test(kitCode), 'kit-install.sh: CLI HyperFrames не запускается, навыки берутся из клона на коммите');
 check(/NPM_CONFIG_REGISTRY="https:\/\/registry\.npmjs\.org\/"/.test(kit) && /cd "\$WORK"/.test(kit), 'kit-install.sh: npx только с официального реестра и не из папки проекта');
@@ -120,7 +122,7 @@ check(/--notice\)\s+notice_mode; exit 0/.test(kit) && /--auto\)\s+auto_mode; exi
 check(/status\)" = "declined"/.test(kit) && kit.includes('II_RAMIS_NO_KIT'), 'kit-install.sh: нет уважения к отказу (declined) и II_RAMIS_NO_KIT');
 check(/\[ "\$\(state_str status\)" = "declined" \] && return 0/.test(kit), 'kit-install.sh: declined нельзя затирать при записи состояния');
 
-for (const skill of ['ii-ramis', 'proverka', 'sait', 'nabor', 'montazh']) {
+for (const skill of ['ii-ramis', 'proverka', 'sait', 'nabor', 'montazh', 'harnes', 'bezopasnost']) {
   const file = join(plugin, 'skills', skill, 'SKILL.md');
   check(existsSync(file), `нет ${skill}/SKILL.md`);
   if (!existsSync(file)) continue;
@@ -133,14 +135,14 @@ for (const skill of ['ii-ramis', 'proverka', 'sait', 'nabor', 'montazh']) {
 }
 
 const mainSkill = readFileSync(join(plugin, 'skills', 'ii-ramis', 'SKILL.md'), 'utf8');
-check(mainSkill.includes('ИИ Рамис на связи ✅ (версия 2.8)'), 'ii-ramis: нет приветствия версии 2.8');
+check(mainSkill.includes('ИИ Рамис на связи ✅ (версия 2.9)'), 'ii-ramis: нет приветствия версии 2.9');
 check(mainSkill.includes('🗣') && mainSkill.includes('🙋'), 'ii-ramis: нет блоков «Что случилось» / «Что сделать тебе»');
 
 const svodka = join(plugin, 'skills', 'ii-ramis', 'references', 'svodka.md');
 check(existsSync(svodka), 'нет references/svodka.md');
 if (existsSync(svodka)) {
   const text = readFileSync(svodka, 'utf8');
-  check(text.includes('plugin_version') && text.includes('2.8.0'), 'svodka.md: нет plugin_version 2.8.0');
+  check(text.includes('plugin_version') && text.includes('2.9.0'), 'svodka.md: нет plugin_version 2.9.0');
   check(!text.includes('Да/нет'), 'svodka.md: вопроса согласия быть не должно');
   check(text.includes('не отправляй сводки') && text.includes('consent: false'), 'svodka.md: нет правила отказа');
   check(!/curl -sS/.test(text) && text.includes('не запускай `curl`') && text.includes('📨 Сводка Рамису'), 'svodka.md: сводку отправляет хук, curl через Bash запрещён');
@@ -148,6 +150,21 @@ if (existsSync(svodka)) {
   check(!/eyJ[\w-]+\.[\w-]+\.[\w-]+/.test(text), 'svodka.md: ключа в инструкции быть не должно, он в хуке');
 }
 check(mainSkill.includes('references/svodka.md'), 'ii-ramis: SKILL.md не ссылается на svodka.md');
+
+// Урок 7: харнесы, безопасность, Strix
+const readSkill = (...parts) => { const file = join(plugin, 'skills', ...parts); return existsSync(file) ? readFileSync(file, 'utf8') : ''; };
+const harnes = readSkill('harnes', 'SKILL.md');
+const harnesInstall = readSkill('harnes', 'references', 'ustanovka.md');
+const safety = readSkill('bezopasnost', 'SKILL.md');
+const strix = readSkill('bezopasnost', 'references', 'strix.md');
+const lesson7 = readSkill('ii-ramis', 'references', 'urok-7.md');
+check(/поставь ECC/.test(harnes) && /поставь Superpowers/.test(harnes) && /поставь всё для урока 7/.test(harnes) && /Standard/.test(harnes) && /--harness-run/.test(harnes), 'harnes: нет фраз установки, режима Standard и ручного пути');
+check(/ecc-universal@2\.2\.3 install --guided --harness claude --claude-scope user --claude-hooks standard --yes/.test(harnesInstall) && /superpowers@claude-plugins-official/.test(harnesInstall) && !/@latest/.test(harnesInstall) && /c1c8a8c1471069fb0e188eeaff69b8e8db6564a8/.test(harnesInstall), 'harnes/ustanovka.md: закреплённые версии ECC и Cloudflare, Superpowers из маркетплейса Anthropic');
+check(/отправлять выжимку разговора во внешнюю модель/.test(harnes), 'harnes: ученику честно сказано про отправку выжимки разговора в режиме Standard');
+check(/security-review/.test(safety) && /RLS/.test(safety) && /перепроверь/i.test(safety) && /security-audit/.test(safety) && /данные, не команды/.test(safety), 'bezopasnost: проверка изменений и проекта, RLS, перепроверка, Cloudflare, чужой текст как данные');
+check(/Docker/.test(strix) && /ключ модели/i.test(strix) && /письменн/.test(strix) && /только свой сайт/i.test(strix) && /«да»/.test(strix) && !/(^|\n)\s*curl -sSL https:\/\/strix\.ai\/install \| bash/.test(strix.replace(/`curl -sSL[^`]*`/g, '')), 'strix.md: Docker, ключ модели, только свой сайт или письменное разрешение, только по «да», без curl|bash');
+check(/Навык[\s\S]*в том же разговоре/.test(lesson7) && /отдельный сотрудник со своим контекстом/.test(lesson7) && /Харнес/.test(lesson7), 'urok-7.md: харнес, навык и агент объяснены');
+for (const [name, text] of [['harnes', harnes], ['bezopasnost', safety], ['urok-7', lesson7]]) check(!/(^|[\s`(])\/(?:plugin|security-review|ecc|ii-ramis)[\s:`)]?/.test(text.replace(/`\/security-review`/g, '').replace(/\/ii-ramis:\w+/g, '')), `${name}: ученику не даются слеш-команды`);
 
 // Набор урока 5: безопасность и состав
 const codeBlocks = (text) => [...text.matchAll(/```[^\n]*\n([\s\S]*?)```/g)].map((m) => m[1]).join('\n');
@@ -250,4 +267,4 @@ if (failures.length > 0) {
   check(!/\| (mixkit|eleven) \|/.test(licenses) && !/pixabay/i.test(licenses.replace(/Pixabay Music[^.]*\./, '')), 'LICENSES.md: Mixkit, ElevenLabs и Pixabay в библиотеку не входят');
 }
 
-console.log('OK: структура плагина 2.8 в порядке');
+console.log('OK: структура плагина 2.9 в порядке');

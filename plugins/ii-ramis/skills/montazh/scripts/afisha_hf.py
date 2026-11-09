@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -312,12 +313,28 @@ def zoom_filter(plan, label_in, label_out):
             f"crop={W}:{H}:(iw-{W})/2:(ih-{H})/2,setsar=1[{label_out}]")
 
 
+def hf_env(neutral):
+    """Окружение для npx: официальный реестр, пустые пользовательские и системные настройки npm, без статистики."""
+    empty_config = Path(neutral) / "empty-npm-config"
+    empty_config.write_text("", encoding="utf-8")
+    env = {name: value for name, value in os.environ.items() if not name.upper().startswith("NPM_CONFIG_")}
+    env.update({
+        "NPM_CONFIG_REGISTRY": "https://registry.npmjs.org/", "NPM_CONFIG_USERCONFIG": str(empty_config),
+        "NPM_CONFIG_GLOBALCONFIG": str(empty_config), "NPM_CONFIG_UPDATE_NOTIFIER": "false",
+        "HYPERFRAMES_NO_TELEMETRY": "1", "HYPERFRAMES_NO_UPDATE_CHECK": "1", "DO_NOT_TRACK": "1", "DISABLE_TELEMETRY": "1",
+    })
+    return env
+
+
 def render_layer(layer_dir, frames_dir, log):
     if frames_dir.exists():
         raise HFError("папка кадров уже есть (внутренняя ошибка)")
-    command = [*HF_CMD, "render", str(layer_dir), "--format", "png-sequence", "--workers", "1", "-o", str(frames_dir), "--quiet"]
+    # npx запускается из пустой временной папки, а не из папки проекта ученика: чужие настройки npm и package.json не подменят пакет.
+    command = [*HF_CMD, "render", str(Path(layer_dir).resolve()), "--format", "png-sequence", "--workers", "1",
+               "-o", str(Path(frames_dir).resolve()), "--quiet"]
     try:
-        result = subprocess.run(command, cwd=str(layer_dir.parent), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=1500)
+        with tempfile.TemporaryDirectory(prefix="ii-ramis-hf-") as neutral:
+            result = subprocess.run(command, cwd=neutral, env=hf_env(neutral), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=1500)
     except (OSError, subprocess.SubprocessError) as error:
         raise HFError(f"HyperFrames не запустился: {error}") from error
     tail = result.stdout.decode("utf-8", "replace")[-800:]
