@@ -53,7 +53,7 @@ try {
   check(received.length === 1 && received[0].method === 'POST' && received[0].url === '/rest/v1/sessions', 'сводка должна уйти одним POST в sessions');
   const row = JSON.parse(received[0]?.body ?? '{}');
   check(row.student === 'Айдана' && row.lesson === 4 && row.stuck === true && row.errors === 2, `поля строки: ${received[0]?.body}`);
-  check(row.recap.startsWith('Собрали первую страницу') && row.summary?.plugin_version === '2.9.0' && row.summary?.text === row.recap, 'recap и summary должны совпадать, версия 2.7.0');
+  check(row.recap.startsWith('Собрали первую страницу') && row.summary?.plugin_version === '2.9.1' && row.summary?.text === row.recap, 'recap и summary должны совпадать, версия 2.9.1');
   check(!/Сводка Рамису|📨/.test(row.recap), 'служебный префикс в текст не попадает');
   check(Object.keys(row).sort().join(',') === 'errors,install_id,lesson,recap,stuck,student,summary', `лишние поля в строке: ${Object.keys(row)}`);
   check(/^sb_publishable_[\w-]+$/.test(received[0].headers.apikey) && received[0].headers.authorization === undefined && received[0].headers.prefer === 'return=minimal', 'ключ sb_publishable_ только в apikey, без Authorization, Prefer: return=minimal');
@@ -143,8 +143,70 @@ try {
   const maskMarker = join(talker, '.ii-ramis', 'mask-declined');
   await prompt(talker, 'не ставь маску');
   check(existsSync(maskMarker), '«не ставь маску» записывает отметку отказа');
-  const plain = await prompt(newHome(), 'сделай мне сайт про кофейню');
-  check(plain.out === '', 'обычный запрос хук не трогает');
+  const named = newHome();
+  mkdirSync(join(named, '.ii-ramis'), { recursive: true });
+  writeFileSync(join(named, '.ii-ramis', 'svodka.json'), '{"consent":true,"name":"Айдана"}\n');
+  const plain = await prompt(named, 'сделай мне сайт про кофейню');
+  check(plain.out === '', 'обычный запрос при известном имени хук не трогает');
+
+  // Имя ученика: спрашиваем один раз за сессию, ответ записывает хук
+  const askPrompt = (home, text, session) => run(home, '--prompt', { hook_event_name: 'UserPromptSubmit', prompt: text, session_id: session });
+  const answers = async (reply, session = 's1') => {
+    const h = newHome();
+    const ask = await askPrompt(h, 'привет, помоги с сайтом', session);
+    check(/Как тебя зовут/.test(ask.out) && /ОДИН раз/.test(ask.out), `первое сообщение без имени: хук просит спросить имя: ${ask.out}`);
+    const answer = await askPrompt(h, reply, session);
+    return { h, ask, answer, saved: settings(h) };
+  };
+  {
+    const ok = await answers('Айдана');
+    check(ok.saved.name === 'Айдана' && ok.saved.name_pending === false, `имя «Айдана» записано: ${JSON.stringify(ok.saved)}`);
+    check(/имя ученика записано/.test(ok.answer.out) && !ok.answer.out.includes('Айдана'), 'подтверждение для Claude без самого имени (ввод ученика в контекст не идёт)');
+    check((await askPrompt(ok.h, 'дальше', 's2')).out === '', 'после записи имени больше не спрашиваем');
+    const again = await askPrompt(ok.h, 'ещё одно', 's1');
+    check(again.out === '', 'в той же сессии повторно не спрашиваем');
+  }
+  for (const [reply, expected] of [['Меня зовут Бекзат', 'Бекзат'], ['меня зовут жылдыз, хочу сайт', 'Жылдыз'], ['Я Нурсултан', 'Нурсултан'], ['Анна-Мария Ким', 'Анна-Мария Ким'], ['Имя: Али', 'Али'], ['мое имя Эркин.', 'Эркин']]) {
+    check((await answers(reply)).saved.name === expected, `«${reply}» → «${expected}»`);
+  }
+  for (const reply of ['привет', 'Привет', 'сделай мне сайт', 'Расскажи', 'я хочу сайт про кофе', 'Что дальше?', 'да', 'Ок', 'Айдана, а как поставить Node?', 'Айдана 5', 'Меня зовут', 'x'.repeat(80), 'Продолжай', 'Я Не знаю']) {
+    const result = await answers(reply);
+    check(result.saved.name === undefined && result.saved.name_pending === false && !result.saved.name_declined, `«${reply.slice(0, 30)}» именем не считается: ${JSON.stringify(result.saved)}`);
+    check((await askPrompt(result.h, 'ещё', 's1')).out === '', 'если ученик не ответил, в этой сессии не переспрашиваем');
+  }
+  {
+    const refuse = await answers('Не скажу');
+    check(refuse.saved.name_declined === true && refuse.saved.name === undefined && /больше про имя не спрашивай/.test(refuse.answer.out), 'отказ записан');
+    check((await askPrompt(refuse.h, 'сделай сайт', 's9')).out === '', 'после отказа в новой сессии не спрашиваем');
+    writeFileSync(join(refuse.h, '.ii-ramis', 'x'), '');
+    const before = received.length;
+    await stop(refuse.h, good);
+    check(JSON.parse(received[before]?.body ?? '{}').student === 'без имени', 'после отказа имя из строки сводки не берём');
+  }
+  {
+    // не больше трёх вопросов за всё время, по одному за сессию
+    const h = newHome();
+    let asked = 0;
+    for (const session of ['a', 'b', 'c', 'd', 'e']) { if ((await askPrompt(h, 'дальше', session)).out.includes('Как тебя зовут')) asked += 1; await askPrompt(h, 'дальше дальше', session); }
+    check(asked === 3, `вопрос про имя не больше трёх раз: ${asked}`);
+  }
+  {
+    // отказ от сводок: имя не спрашиваем; служебные фразы вопросом не перебиваем
+    const off = newHome();
+    await prompt(off, 'не отправляй сводки');
+    check((await askPrompt(off, 'привет', 's1')).out === '', 'при consent: false имя не спрашиваем');
+    const upd = newHome();
+    check(!/Как тебя зовут/.test((await askPrompt(upd, 'обнови плагин ИИ Рамис', 's1')).out), 'просьба обновить плагин вопросом про имя не перебивается');
+    const forget = newHome();
+    mkdirSync(join(forget, '.ii-ramis'), { recursive: true });
+    writeFileSync(join(forget, '.ii-ramis', 'svodka.json'), '{"consent":true,"name":"Айдана"}\n');
+    await prompt(forget, 'забудь моё имя');
+    check(settings(forget).name === undefined && settings(forget).name_declined === true, '«забудь моё имя» удаляет имя');
+    // имя в строке сводки очищается от лишнего
+    const before = received.length;
+    await stop(newHome(), good.replace('имя: Айдана', 'имя: Айдана Иванова Петрова Сидорова'));
+    check(JSON.parse(received[before]?.body ?? '{}').student === 'без имени', 'имя из четырёх слов не принимается');
+  }
   const notSet = newHome();
   await prompt(notSet, 'поставь набор');
   check(!existsSync(join(notSet, '.ii-ramis', 'nabor.json')), '«поставь набор» без отказа ничего не пишет');
@@ -177,7 +239,7 @@ try {
   const pulseRun = await stopWithSession(pulseHome, 'Просто ответ без сводки.', 'sess-1');
   check(pulseRun.code === 0 && pulseRun.out === '', 'пульс ничего не печатает ученику');
   const pulseRow = received.length === pulseBase + 1 ? JSON.parse(received.at(-1).body) : null;
-  check(pulseRow?.kind === 'pulse' && pulseRow.stuck === false && /^[0-9a-f-]{36}$/.test(pulseRow.install_id) && pulseRow.summary?.plugin_version === '2.9.0', `пульс уходит без строки сводки: ${received.at(-1)?.body}`);
+  check(pulseRow?.kind === 'pulse' && pulseRow.stuck === false && /^[0-9a-f-]{36}$/.test(pulseRow.install_id) && pulseRow.summary?.plugin_version === '2.9.1', `пульс уходит без строки сводки: ${received.at(-1)?.body}`);
   check(pulseRow && Object.keys(pulseRow).sort().join(',') === 'install_id,kind,stuck,student,summary' && Object.keys(pulseRow.summary).sort().join(',') === 'at,kind,plugin_version', `в пульсе только служебные поля: ${Object.keys(pulseRow ?? {})}`);
   await stopWithSession(pulseHome, 'Ещё один ответ.', 'sess-2');
   check(received.length === pulseBase + 1, 'второй пульс раньше чем через 30 минут не уходит');
