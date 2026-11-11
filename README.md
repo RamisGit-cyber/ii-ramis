@@ -118,6 +118,8 @@
 
 Включить автообновление: `/plugin` → вкладка Marketplaces → `ii-ramis` → **Enable auto-update**. Тогда новая версия подхватывается при следующем запуске, а в запущенной сессии виден `Plugin updated: ii-ramis · Run /reload-plugins to apply`.
 
+**С 2.9.1** плагин один раз за сессию спрашивает имя ученика (для сводок Рамису; отказ «не скажу» запоминается), а «обнови плагин» находит `claude` и во встроенных копиях Claude Desktop и, если не находит, отвечает одной строкой про версию (без меню `/plugin`).
+
 **С 2.7.2 можно просто написать «обнови плагин ИИ Рамис»** (или «обнови плагин», «обновись»). Команды Claude в Desktop идут в песочнице и не могут писать в `~/.claude/plugins` («Operation not permitted»), поэтому на Mac и Linux обновление выполняет хук плагина вне песочницы (`hooks/kit-install.sh --update-on-prompt`: `claude plugin marketplace update ii-ramis` и `claude plugin update ii-ramis@ii-ramis`, claude ищется в PATH и среди встроенных копий приложения), а Claude сообщает версию до и после и просит полностью перезапустить приложение (Mac: Cmd+Q). На Windows Claude запускает блок PowerShell из `skills/ii-ramis/references/obnovlenie.md`. Работает, когда уже стоит версия 2.7.2 или новее; у более старых путь из списка выше.
 
 ## Приватность

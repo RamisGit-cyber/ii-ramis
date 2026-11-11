@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, rmSync,
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const script = join(root, 'plugins', 'ii-ramis', 'hooks', 'kit-install.sh');
@@ -29,10 +29,17 @@ case "$1 $2" in
 esac
 `);
 chmodSync(join(bin, 'claude'), 0o755);
+const fakeClaude = readFileSync(join(bin, 'claude'), 'utf8');
+const ownVersion = JSON.parse(readFileSync(join(root, 'plugins', 'ii-ramis', '.claude-plugin', 'plugin.json'), 'utf8')).version;
+// Маленький сервер в отдельном процессе (spawnSync блокирует этот): отдаёт «последнюю версию» как plugin.json на GitHub
+const startVersionServer = (version) => new Promise((resolve) => {
+  const child = spawn('node', ['-e', `const s=require('http').createServer((q,r)=>r.end(JSON.stringify({version:'${version}'}))).listen(0,'127.0.0.1',()=>console.log(s.address().port))`], { stdio: ['ignore', 'pipe', 'inherit'] });
+  child.stdout.once('data', (chunk) => resolve({ child, url: `http://127.0.0.1:${String(chunk).trim()}/plugin.json` }));
+});
 const systemPath = `${bin}:${process.argv0.replace(/\/node$/, '')}:/usr/bin:/bin`;
-const run = (prompt, homeDir = home, path = systemPath) => spawnSync('bash', [script, '--update-on-prompt'], {
+const run = (prompt, homeDir = home, path = systemPath, extraEnv = {}) => spawnSync('bash', [script, '--update-on-prompt'], {
   input: JSON.stringify({ prompt }), encoding: 'utf8',
-  env: { PATH: path, HOME: homeDir, CLAUDE_CODE_EXECPATH: '' },
+  env: { PATH: path, HOME: homeDir, CLAUDE_CODE_EXECPATH: '', II_RAMIS_TEST_LATEST_URL: 'http://127.0.0.1:9/none', ...extraEnv },
 });
 
 try {
@@ -48,8 +55,32 @@ try {
   check(/после: 2\.7\.2/.test(run('обновись').stdout), '«обновись» тоже обновляет');
   writeFileSync(versionFile, '2.7.1');
   check(/после: 2\.7\.2/.test(run('обнови плагин').stdout), '«обнови плагин» тоже обновляет');
-  const noClaude = run('обнови плагин', join(base, 'empty'), `${process.argv0.replace(/\/node$/, '')}:/usr/bin:/bin`);
-  check(noClaude.status === 0 && /команда claude не найдена/.test(noClaude.stdout), `без claude хук честно говорит об этом и не падает: ${noClaude.stdout}`);
+  // claude не в PATH: встроенная копия Desktop на Mac (в папке версии, внутри .app) и запасные пути находятся
+  const noPath = `${process.argv0.replace(/\/node$/, '')}:/usr/bin:/bin`;
+  const plantClaude = (homeDir, relative) => { const file = join(homeDir, relative); mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, fakeClaude); chmodSync(file, 0o755); };
+  for (const relative of ['Library/Application Support/Claude/claude-code/2.1.5/claude.app/Contents/MacOS/claude', 'Library/Application Support/Claude/claude-code/2.1.5/claude', '.config/Claude/claude-code/2.1.5/claude', '.nvm/versions/node/v22.1.0/bin/claude', '.npm-global/bin/claude', '.bun/bin/claude']) {
+    const found = join(base, `home-${relative.length}-${relative.charCodeAt(2)}`);
+    mkdirSync(found, { recursive: true });
+    plantClaude(found, relative);
+    writeFileSync(versionFile, '2.7.1');
+    check(/после: 2\.7\.2/.test(run('обнови плагин ИИ Рамис', found, noPath).stdout), `claude найден по пути ${relative}`);
+  }
+
+  // подмена адреса проверки версии только на чистый локальный: с @ в адресе (обход http://127.0.0.1:80@чужой-хост/) не принимается
+  const hostile = run('обнови плагин ИИ Рамис', join(base, 'empty2'), noPath, { II_RAMIS_TEST_LATEST_URL: 'http://127.0.0.1:80@example.invalid/plugin.json' });
+  check(/Не получилось проверить|последней версии|Вышла новая/.test(hostile.stdout) && !/example\.invalid/.test(hostile.stdout), `адрес с @ не ломает хук: ${hostile.stdout}`);
+  // claude нигде нет: ученику одна короткая строка, без /plugin и без команд
+  const studentLine = (out) => out.match(/«([^»]+)»/)?.[1] ?? '';
+  const nothing = join(base, 'empty');
+  mkdirSync(nothing);
+  for (const [latest, expected, label] of [[ownVersion, new RegExp(`Плагин уже последней версии ${ownVersion.replace(/\./g, '\\.')}`), 'версия совпала с последней'], ['9.9.9', /Вышла новая версия 9\.9\.9/, 'есть новее'], [null, /Не получилось проверить/, 'сети нет']]) {
+    const server = latest ? await startVersionServer(latest) : null;
+    const result = run('обнови плагин ИИ Рамис', nothing, noPath, server ? { II_RAMIS_TEST_LATEST_URL: server.url } : {});
+    server?.child.kill();
+    check(result.status === 0 && expected.test(result.stdout), `${label}: ${result.stdout}`);
+    const line = studentLine(result.stdout);
+    check(line.length > 0 && line.length < 260 && !/\/plugin|Manage plugins|Update now|marketplace/i.test(line), `${label}: строка ученику короткая и без /plugin: ${line}`);
+      }
 } finally {
   rmSync(base, { recursive: true, force: true });
 }

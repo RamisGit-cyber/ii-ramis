@@ -125,12 +125,26 @@ auto_mode() {
 
 # ============================ РЕЖИМ УСТАНОВКИ ============================
 find_claude() {
-  local c
-  for c in "${CLAUDE_CODE_EXECPATH:-}" "$(command -v claude 2>/dev/null)" "$HOME/.local/bin/claude" "$HOME/.claude/local/claude" /opt/homebrew/bin/claude /usr/local/bin/claude; do
-    [ -n "$c" ] && [ -x "$c" ] && { echo "$c"; return; }
+  local c root npm_prefix
+  for c in "${CLAUDE_CODE_EXECPATH:-}" "$(command -v claude 2>/dev/null)" "$HOME/.local/bin/claude" "$HOME/.claude/local/claude" "$HOME/.claude/local/node_modules/.bin/claude" \
+           "$HOME/.npm-global/bin/claude" "$HOME/.volta/bin/claude" "$HOME/.bun/bin/claude" /opt/homebrew/bin/claude /usr/local/bin/claude; do
+    [ -n "$c" ] && [ -x "$c" ] && [ -f "$c" ] && { echo "$c"; return; }
   done
-  # встроенная копия в приложении Claude Desktop (Mac)
-  ls -d "$HOME/Library/Application Support/Claude/claude-code"/*/claude.app/Contents/MacOS/claude 2>/dev/null | sort -V | tail -1
+  # глобальная установка через npm (префикс может быть нестандартным); у npm предел времени, чтобы хук не завис
+  if command -v npm >/dev/null 2>&1 && { command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; }; then
+    npm_prefix="$(limited 5 npm prefix -g 2>/dev/null | head -1)"
+    c="$npm_prefix/bin/claude"
+    [ -n "$npm_prefix" ] && [ -x "$c" ] && [ -f "$c" ] && { echo "$c"; return; }
+  fi
+  # nvm: самая свежая версия Node с claude
+  c="$(ls -d "$HOME"/.nvm/versions/node/*/bin/claude 2>/dev/null | sort -V | tail -1)"
+  [ -n "$c" ] && [ -x "$c" ] && { echo "$c"; return; }
+  # встроенная копия в приложении Claude Desktop: Mac (Application Support) и Linux (~/.config); путь внутри папки версии меняется, поэтому ищем по имени
+  for root in "$HOME/Library/Application Support/Claude/claude-code" "$HOME/Library/Application Support/Claude/claude-code-vm" "$HOME/.config/Claude/claude-code"; do
+    [ -d "$root" ] || continue
+    c="$(find "$root" -maxdepth 6 -type f -name claude -perm -u+x 2>/dev/null | sort -V | tail -1)"
+    [ -n "$c" ] && { echo "$c"; return; }
+  done
 }
 
 declined() { [ "$(state_str status)" = "declined" ]; }
@@ -378,10 +392,24 @@ mask_mode() {
   fi
 }
 
+# Версия установленного плагина (из его plugin.json) и последняя на GitHub. Только цифры и точки: значение идёт в подсказку для Claude.
+LATEST_URL_DEFAULT="https://raw.githubusercontent.com/RamisGit-cyber/ii-ramis/main/plugins/ii-ramis/.claude-plugin/plugin.json"
+own_version() {
+  sed -n 's/.*"version": *"\([0-9][0-9.]*\)".*/\1/p' "$(dirname "$SELF")/../.claude-plugin/plugin.json" 2>/dev/null | head -1 | tr -cd '0-9.' | head -c 20
+}
+latest_version() {
+  local source_url="$LATEST_URL_DEFAULT" url_proto="=https" found
+  # подмена адреса только на локальный (для тестов)
+  case "${II_RAMIS_TEST_LATEST_URL:-}" in *@*|*\\*|*" "*) ;; http://127.0.0.1[:/]*) source_url="$II_RAMIS_TEST_LATEST_URL"; url_proto="=http" ;; esac
+  command -v curl >/dev/null 2>&1 || return 0
+  found="$(curl --proto "$url_proto" --tlsv1.2 -fsS --max-time 8 "$source_url" 2>/dev/null | sed -n 's/.*"version": *"\([0-9][0-9.]*\)".*/\1/p' | head -1 | tr -cd '0-9.' | head -c 20)"
+  case "$found" in [0-9]*.[0-9]*.[0-9]*) printf '%s' "$found" ;; esac
+}
+
 # Обновление плагина по фразе ученика («обнови плагин ИИ Рамис», «обнови плагин», «обновись»). Запускается хуком UserPromptSubmit
 # вне песочницы Claude Desktop (команды Claude из Bash не могут писать в ~/.claude). Печатает подсказку для Claude, ничего больше не делает.
 update_on_prompt_mode() {
-  local raw hit claude_bin before after code=0 lock="$STATE_DIR/update.lock"
+  local raw hit claude_bin before after latest_known code=0 lock="$STATE_DIR/update.lock"
   [ -n "${II_RAMIS_UPDATING:-}" ] && return 0
   raw="$(cat 2>/dev/null | head -c 20000)"
   command -v node >/dev/null 2>&1 || return 0
@@ -394,7 +422,16 @@ console.log(ask?'yes':'no')}catch(e){console.log('no')}})" 2>/dev/null)"
   [ "$hit" = "yes" ] || return 0
   claude_bin="$(find_claude)"
   if [ -z "$claude_bin" ]; then
-    echo "ИИ Рамис (хук): ученик просит обновить плагин, но команда claude не найдена. Скажи честно: обновить можно через меню плагинов приложения (Manage plugins, маркетплейс ii-ramis, Update), потом полностью перезапустить приложение."
+    local own latest
+    own="$(own_version)"; latest="$(latest_version)"
+    # Ученику одна короткая строка, без панели /plugin и без команд (решение Рамиса 11.11): объясняем Claude, что сказать.
+    if [ -n "$latest" ] && [ -n "$own" ] && ver_ge "$own" "$latest"; then
+      echo "ИИ Рамис (хук): ученик просит обновить плагин; программа claude не найдена, но проверка показала, что установлена последняя версия $own. Ответь ученику ровно одной строкой: «Плагин уже последней версии $own, обновлять ничего не нужно.» Больше ничего не добавляй, про /plugin и меню не пиши, команд не запускай."
+    elif [ -n "$latest" ]; then
+      echo "ИИ Рамис (хук): ученик просит обновить плагин; программа claude не найдена, обновить сам не могу. Установлена версия ${own:-неизвестна}, последняя на GitHub $latest. Ответь ученику одной-двумя короткими строками: «Вышла новая версия $latest, у тебя ${own:-старая}. Полностью закрой приложение и открой заново; если версия не изменится, напиши в группу курса.» Про /plugin, меню и команды не пиши, Bash не запускай."
+    else
+      echo "ИИ Рамис (хук): ученик просит обновить плагин; программа claude не найдена, и проверить последнюю версию не вышло (нет сети?). Установлена версия ${own:-неизвестна}. Ответь ученику одной строкой: «Не получилось проверить новую версию (у тебя ${own:-неизвестна}). Полностью закрой приложение и открой заново; если не поможет, напиши в группу курса.» Про /plugin, меню и команды не пиши, Bash не запускай."
+    fi
     return 0
   fi
   mkdir -p "$STATE_DIR"
@@ -410,11 +447,12 @@ console.log(ask?'yes':'no')}catch(e){console.log('no')}})" 2>/dev/null)"
   # у каждой команды свой предел времени (если в системе есть timeout или gtimeout), зависшая сеть не держит сообщение ученика
   run_limited() { if command -v timeout >/dev/null 2>&1; then timeout 60 "$@"; elif command -v gtimeout >/dev/null 2>&1; then gtimeout 60 "$@"; else "$@"; fi; }
   before="$(plugin_version)"
+  latest_known="$(latest_version)"
   run_limited "$claude_bin" plugin marketplace update ii-ramis >/dev/null 2>&1 || code=$?
   run_limited "$claude_bin" plugin update ii-ramis@ii-ramis >/dev/null 2>&1 || code=$?
   after="$(plugin_version)"
   rmdir "$lock" 2>/dev/null
-  echo "ИИ Рамис (хук): обновление плагина выполнено вне песочницы. Версия до: ${before}, после: ${after}; код завершения команд: ${code} (0 значит без ошибок; после обновления команда может показывать прежнюю версию, пока приложение не перезапущено). Скажи ученику одной строкой: что было и что стало, и попроси ПОЛНОСТЬЮ перезапустить приложение (Mac: Cmd+Q и открыть заново; Windows: выйти через значок в трее и открыть). Если версия не изменилась или код не 0, честно скажи, что новой версии пока нет или обновление не прошло, и не повторяй команды."
+  echo "ИИ Рамис (хук): обновление плагина выполнено вне песочницы. Версия до: ${before}, после: ${after}; код завершения команд: ${code} (0 значит без ошибок; после обновления команда может показывать прежнюю версию, пока приложение не перезапущено). Скажи ученику одной строкой: что было и что стало, и попроси ПОЛНОСТЬЮ перезапустить приложение (Mac: Cmd+Q и открыть заново; Windows: выйти через значок в трее и открыть). Последняя версия на GitHub: ${latest_known:-проверить не удалось}. Если версия не изменилась и она равна последней, скажи одной строкой «Плагин уже последней версии ${after}.» и перезапуск не проси. Если версия не изменилась, а последняя новее, или код не 0, честно скажи одной строкой, что обновление не прошло и нужно написать в группу курса; про /plugin и меню не пиши, команды не повторяй."
 }
 
 # ============================ ХАРНЕСЫ УРОКА 7 ============================
