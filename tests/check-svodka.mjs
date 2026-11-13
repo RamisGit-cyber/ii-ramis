@@ -53,7 +53,7 @@ try {
   check(received.length === 1 && received[0].method === 'POST' && received[0].url === '/rest/v1/sessions', 'сводка должна уйти одним POST в sessions');
   const row = JSON.parse(received[0]?.body ?? '{}');
   check(row.student === 'Айдана' && row.lesson === 4 && row.stuck === true && row.errors === 2, `поля строки: ${received[0]?.body}`);
-  check(row.recap.startsWith('Собрали первую страницу') && row.summary?.plugin_version === '2.10.2' && row.summary?.text === row.recap, 'recap и summary должны совпадать, версия 2.10.2');
+  check(row.recap.startsWith('Собрали первую страницу') && row.summary?.plugin_version === '2.10.3' && row.summary?.text === row.recap, 'recap и summary должны совпадать, версия 2.10.3');
   check(!/Сводка Рамису|📨/.test(row.recap), 'служебный префикс в текст не попадает');
   check(Object.keys(row).sort().join(',') === 'errors,install_id,lesson,recap,stuck,student,summary', `лишние поля в строке: ${Object.keys(row)}`);
   check(/^sb_publishable_[\w-]+$/.test(received[0].headers.apikey) && received[0].headers.authorization === undefined && received[0].headers.prefer === 'return=minimal', 'ключ sb_publishable_ только в apikey, без Authorization, Prefer: return=minimal');
@@ -184,6 +184,21 @@ try {
     check(JSON.parse(received[before]?.body ?? '{}').student === 'без имени', 'после отказа имя из строки сводки не берём');
   }
   {
+    // «меня зовут …» в любой момент записывает имя, даже без вопроса и даже если имя уже было
+    const any = newHome();
+    const r1 = await askPrompt(any, 'Меня зовут Гульзат Джунушева', 'z1');
+    check(settings(any).name === 'Гульзат Джунушева' && /имя ученика записано/.test(r1.out), `имя в любой момент: ${JSON.stringify(settings(any))}`);
+    await askPrompt(any, 'меня зовут жылдыз', 'z2');
+    check(settings(any).name === 'Жылдыз', `имя можно поменять: ${JSON.stringify(settings(any))}`);
+    const not = newHome();
+    await askPrompt(not, 'меня зовут как? напомни', 'z3');
+    check(settings(not).name === undefined, 'вопрос «меня зовут как?» именем не считается');
+    const off = newHome();
+    await prompt(off, 'не отправляй сводки');
+    await askPrompt(off, 'меня зовут Али', 'z4');
+    check(settings(off).name === undefined, 'при отказе от сводок имя не пишем');
+  }
+  {
     // не больше трёх вопросов за всё время, по одному за сессию
     const h = newHome();
     let asked = 0;
@@ -239,7 +254,7 @@ try {
   const pulseRun = await stopWithSession(pulseHome, 'Просто ответ без сводки.', 'sess-1');
   check(pulseRun.code === 0 && pulseRun.out === '', 'пульс ничего не печатает ученику');
   const pulseRow = received.length === pulseBase + 1 ? JSON.parse(received.at(-1).body) : null;
-  check(pulseRow?.kind === 'pulse' && pulseRow.stuck === false && /^[0-9a-f-]{36}$/.test(pulseRow.install_id) && pulseRow.summary?.plugin_version === '2.10.2', `пульс уходит без строки сводки: ${received.at(-1)?.body}`);
+  check(pulseRow?.kind === 'pulse' && pulseRow.stuck === false && /^[0-9a-f-]{36}$/.test(pulseRow.install_id) && pulseRow.summary?.plugin_version === '2.10.3', `пульс уходит без строки сводки: ${received.at(-1)?.body}`);
   check(pulseRow && Object.keys(pulseRow).sort().join(',') === 'install_id,kind,stuck,student,summary' && Object.keys(pulseRow.summary).sort().join(',') === 'at,kind,plugin_version', `в пульсе только служебные поля: ${Object.keys(pulseRow ?? {})}`);
   await stopWithSession(pulseHome, 'Ещё один ответ.', 'sess-2');
   check(received.length === pulseBase + 1, 'второй пульс раньше чем через 30 минут не уходит');
