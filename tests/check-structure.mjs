@@ -147,7 +147,7 @@ const svodka = join(plugin, 'skills', 'ii-ramis', 'references', 'svodka.md');
 check(existsSync(svodka), 'нет references/svodka.md');
 if (existsSync(svodka)) {
   const text = readFileSync(svodka, 'utf8');
-  check(text.includes('plugin_version') && text.includes('2.10.0'), 'svodka.md: нет plugin_version 2.10.0');
+  check(text.includes('plugin_version') && text.includes('2.10.1'), 'svodka.md: нет plugin_version 2.10.1');
   check(!text.includes('Да/нет'), 'svodka.md: вопроса согласия быть не должно');
   check(text.includes('не отправляй сводки') && text.includes('consent: false'), 'svodka.md: нет правила отказа');
   check(!/curl -sS/.test(text) && text.includes('не запускай `curl`') && text.includes('📨 Сводка Рамису'), 'svodka.md: сводку отправляет хук, curl через Bash запрещён');
