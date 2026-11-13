@@ -32,10 +32,13 @@ import json, os, sys
 path = os.path.expanduser("~/.claude.json")
 state = json.load(open(path)) if os.path.exists(path) else {}
 dirs = (sys.argv[1], os.path.expanduser("~"))
-if state.get("hasCompletedOnboarding") and state.get("bypassPermissionsModeAccepted") and all(
+if state.get("hasCompletedOnboarding") and state.get("bypassPermissionsModeAccepted") and \
+        state.get("fullscreenUpsellSeenCount", 0) >= 99 and all(
         state.get("projects", {}).get(d, {}).get("hasTrustDialogAccepted") for d in dirs):
     sys.exit(0)   # всё уже настроено — файл не трогаем, чтобы не спорить с самим Claude
 state["hasCompletedOnboarding"] = True
+# Окно «Try the new fullscreen renderer?» висит поверх чата и блокирует ответы бота — считаем, что его уже видели.
+state["fullscreenUpsellSeenCount"] = max(state.get("fullscreenUpsellSeenCount", 0), 99)
 state["bypassPermissionsModeAccepted"] = True
 for d in (sys.argv[1], os.path.expanduser("~")):
     state.setdefault("projects", {}).setdefault(d, {})["hasTrustDialogAccepted"] = True
