@@ -16,7 +16,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-const PLUGIN_VERSION = '2.10.2';
+const PLUGIN_VERSION = '2.10.3';
 const REAL_ENDPOINT = 'https://fjxevxclomxlvhpjgbjs.supabase.co/rest/v1/sessions';
 // Подмена адреса только на локальный (для тестов): настройки чужого проекта не смогут увести данные на другой хост.
 const localOverride = (value) => { try { const u = new URL(value); return u.protocol === 'http:' && !u.username && !u.password && (u.hostname === '127.0.0.1' || u.hostname === 'localhost') ? value : ''; } catch { return ''; } };
@@ -149,6 +149,19 @@ function parseNameAnswer(prompt) {
   if (tokens.length === 0 || !tokens.every(nameWord)) return null;
   const name = cleanName(tokens.map(capitalize).join(' '));
   return name ? { name } : null;
+}
+
+// «Меня зовут Айдана» в любой момент (не только в ответ на вопрос): так Рамис может попросить всех учеников назвать себя одной фразой.
+const ANYTIME_NAME = /^(?:пожалуйста,?\s*)?(?:меня\s+зовут|мо[её]\s+имя|зови(?:те)?\s+меня)\s/iu;
+function setNameAnytime(prompt) {
+  const raw = String(prompt ?? '').trim();
+  if (raw.length > 80 || !ANYTIME_NAME.test(raw)) return false;
+  const answer = parseNameAnswer(raw);
+  const settings = loadSettings();
+  if (!answer?.name || !settings || settings.consent === false) return false;
+  writeJson(settingsFile, { ...settings, name: answer.name, name_declined: false, name_pending: false });
+  console.log('ИИ Рамис (хук): имя ученика записано. Подтверди одной строкой и обратись к нему по имени, вопрос про имя больше не задавай.');
+  return true;
 }
 
 const ASK_HINT = 'имя ученика не задано. Выполни просьбу ученика как обычно, а в блоке «Что сделать тебе» в конце ответа ОДИН раз дружелюбно спроси: «Как тебя зовут? Нужно, чтобы Рамис в сводках видел, кому помочь. Просто напиши имя; не хочешь, скажи «не скажу», больше спрашивать не буду.» Файлы не пиши: имя запишет хук из следующего сообщения ученика. Не повторяй вопрос в этой сессии. Если ученик сам назвал имя в разговоре, а хук это не отметил, добавь в строку сводки «имя: …».';
@@ -309,7 +322,7 @@ function promptMode() {
   } else if (/(по)?став(ь|ить)\s+(мне\s+)?набор/.test(text) && readJson(kitFile)?.status === 'declined') {
     rmSync(kitFile, { force: true });
     say('отказ от набора снят, набор поставится при следующем запуске приложения. Скажи ученику закрыть приложение и открыть заново.');
-  } else {
+  } else if (!setNameAnytime(prompt)) {
     nameMode(prompt, sessionId);
   }
 }
