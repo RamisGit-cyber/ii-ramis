@@ -3,7 +3,7 @@
 # Состояние: ~/.ii-server/ (адрес сервера, ключ доступа, временный пароль root — права 600).
 # Секреты (пароль, токен бота, код входа) передаются ТОЛЬКО через stdin, не аргументами, и не печатаются.
 # Команды: newpass | savepass < пароль | init <IP> | setup | push <папка> | login-start | login-code < код |
-#          tg-token < токен | tg-start | tg-pair <код> | status | ssh "<команда>" | root "<команда>"
+#          tg-token < токен | tg-start | tg-pair <код> | rules | status | ssh "<команда>" | root "<команда>"
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,7 +18,24 @@ ip_of() { [ -s "$STATE/ip" ] || die "нет адреса сервера: сна�
 ssh_opts=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o ServerAliveInterval=20 -o UserKnownHostsFile="$STATE/known_hosts")
 as_root() { ssh "${ssh_opts[@]}" -o BatchMode=yes -i "$KEY" "root@$(ip_of)" "$@"; }
 as_ai()   { ssh "${ssh_opts[@]}" -o BatchMode=yes -i "$KEY" "ai@$(ip_of)" "$@"; }
-add_rules() { as_ai 'touch ~/.claude/CLAUDE.md; grep -q "ii-ramis:server-rules" ~/.claude/CLAUDE.md || cat >> ~/.claude/CLAUDE.md' < "$HERE/server-rules.md"; }
+# Блок правил между метками заменяется целиком (новая версия плагина обновляет правила), остальное в CLAUDE.md ученика не трогаем.
+add_rules() { as_ai 'mkdir -p ~/.claude && touch ~/.claude/CLAUDE.md && python3 -c "
+import re, sys, pathlib
+path = pathlib.Path.home() / \".claude/CLAUDE.md\"
+block = sys.stdin.read().strip()
+text = path.read_text(encoding=\"utf-8\")
+pattern = re.compile(r\"<!-- ii-ramis:server-rules -->.*?<!-- /ii-ramis:server-rules -->\", re.S)
+start, end = \"<!-- ii-ramis:server-rules -->\", \"<!-- /ii-ramis:server-rules -->\"
+if text.count(start) == 1 and text.count(end) == 1 and pattern.search(text):
+    text = pattern.sub(lambda m: block, text)
+elif start not in text:
+    text = text.rstrip() + \"\\n\\n\" + block + \"\\n\"
+else:
+    sys.exit(\"метки правил в CLAUDE.md повреждены, правила не тронуты\")
+tmp = path.with_suffix(\".md.tmp\")
+tmp.write_text(text, encoding=\"utf-8\")
+tmp.replace(path)
+"' < "$HERE/server-rules.md"; }
 read_secret() { IFS= read -r value || true; value="${value//$'\r'/}"; printf '%s' "$value"; }
 
 case "${1:-}" in
@@ -98,6 +115,12 @@ if timeout 90 claude -p "ответь одним словом: ок" 2>/dev/null
     code="${2:?Нужен код из ответа бота}"
     [[ "$code" =~ ^[A-Za-z0-9]{4,8}$ ]] || die "код должен быть из букв и цифр, как прислал бот"
     as_ai "python3 - '$code'" < "$HERE/tg-pair.py" ;;
+  rules)
+    # «обнови правила бота»: свежие правила общения в CLAUDE.md сервера и чистый перезапуск бота, чтобы он их перечитал.
+    add_rules
+    as_ai '[ -f ~/assistant/start-bot.sh ] || { echo "Правила обновлены. Бот ещё не установлен: сначала tg-start"; exit 0; }
+      tmux kill-session -t "=bot" 2>/dev/null || true; sleep 2
+      bash ~/assistant/start-bot.sh && echo "Правила бота обновлены, бот перезапущен"' ;;
   status)
     as_ai 'export PATH="$HOME/.local/bin:$PATH"; echo "Сервер: $(hostname), $(uptime -p)"; free -h | sed -n 2p; df -h / | tail -1; tmux ls 2>/dev/null || echo "бот не запущен"; systemctl --user is-active assistant.timer 2>/dev/null || true' ;;
   ssh)
@@ -105,5 +128,5 @@ if timeout 90 claude -p "ответь одним словом: ок" 2>/dev/null
   root)
     shift; as_root "$@" ;;
   *)
-    echo "Использование: srv.sh newpass | savepass < пароль | init <IP> | setup | push <папка> | login-start | login-code < код | tg-token < токен | tg-start | tg-pair <код> | status | ssh '<команда>'"; exit 1 ;;
+    echo "Использование: srv.sh newpass | savepass < пароль | init <IP> | setup | push <папка> | login-start | login-code < код | tg-token < токен | tg-start | tg-pair <код> | rules | status | ssh '<команда>'"; exit 1 ;;
 esac
