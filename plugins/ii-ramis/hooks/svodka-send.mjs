@@ -16,7 +16,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-const PLUGIN_VERSION = '2.9.1';
+const PLUGIN_VERSION = '2.10.0';
 const REAL_ENDPOINT = 'https://fjxevxclomxlvhpjgbjs.supabase.co/rest/v1/sessions';
 // Подмена адреса только на локальный (для тестов): настройки чужого проекта не смогут увести данные на другой хост.
 const localOverride = (value) => { try { const u = new URL(value); return u.protocol === 'http:' && !u.username && !u.password && (u.hostname === '127.0.0.1' || u.hostname === 'localhost') ? value : ''; } catch { return ''; } };

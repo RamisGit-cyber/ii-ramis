@@ -26,7 +26,7 @@ function readJson(file) {
 
 const manifest = readJson(join(plugin, '.claude-plugin', 'plugin.json'));
 check(manifest.name === 'ii-ramis', 'plugin.json: name должен быть ii-ramis');
-check(/^2\.9\.\d+$/.test(manifest.version ?? ''), 'plugin.json: version должен быть 2.9.x');
+check(/^2\.10\.\d+$/.test(manifest.version ?? ''), 'plugin.json: version должен быть 2.10.x');
 check(!('hooks' in manifest), 'plugin.json: не должно быть поля hooks');
 
 const marketplace = readJson(join(root, '.claude-plugin', 'marketplace.json'));
@@ -47,13 +47,15 @@ check(!JSON.stringify(hooks).includes('PreToolUse'), 'hooks.json: никаких
 check(!/svodka-send/.test(JSON.stringify(hooks.hooks?.SessionStart ?? [])) && JSON.stringify(hooks).split('command -v node').length === 3, 'hooks.json: Node нужен только хукам сводки и с проверкой, что он есть; установка набора от Node не зависит');
 check(JSON.stringify(hooks.hooks?.UserPromptSubmit ?? []).includes('reminder.txt'), 'hooks.json: UserPromptSubmit печатает reminder.txt');
 const reminder = readFileSync(join(plugin, 'hooks', 'reminder.txt'), 'utf8');
-check(reminder.includes('версия 2.9'), 'reminder.txt: версия должна совпадать с plugin.json');
+check(reminder.includes('версия 2.10'), 'reminder.txt: версия должна совпадать с plugin.json');
 check(!existsSync(join(plugin, 'scripts')), 'папки scripts быть не должно');
 const code = listFiles(plugin).filter((file) => ['.mjs', '.js', '.sh', '.ps1', '.py'].includes(extname(file)));
 const montazhScripts = ['common.py', 'transcribe.py', 'montage.py', 'critic.py', 'layouts.py', 'segment.py', 'afisha_hf.py'].map((name) => join(plugin, 'skills', 'montazh', 'scripts', name));
 // Установщики по ссылке (шрифты Афиши, модель маски): единственные скрипты со ссылками и сетью, проверяются отдельно ниже
 const installerScripts = ['safefetch.py', 'install_fonts.py', 'install_rvm.py'].map((name) => join(plugin, 'skills', 'montazh', 'scripts', name));
-check(code.sort().join(',') === [join(plugin, 'hooks', 'kit-install.sh'), join(plugin, 'hooks', 'svodka-send.mjs'), ...montazhScripts, ...installerScripts].sort().join(','), `в плагине разрешены только два хука и скрипты навыка montazh/scripts: ${code.join(', ')}`);
+// Навык server (2.10): скрипты настройки своего сервера, запускаются только по просьбе ученика
+const serverScripts = ['srv.sh', 'remote-root.sh', 'remote-ai.sh', 'login-start.sh', 'bot-install.sh', 'tg-pair.py'].map((name) => join(plugin, 'skills', 'server', 'scripts', name));
+check(code.sort().join(',') === [join(plugin, 'hooks', 'kit-install.sh'), join(plugin, 'hooks', 'svodka-send.mjs'), ...montazhScripts, ...installerScripts, ...serverScripts].sort().join(','), `в плагине разрешены только два хука и скрипты навыков montazh/scripts и server/scripts: ${code.join(', ')}`);
 
 // Хук сводки: безопасность
 const sv = readFileSync(join(plugin, 'hooks', 'svodka-send.mjs'), 'utf8');
@@ -138,14 +140,14 @@ for (const skill of ['ii-ramis', 'proverka', 'sait', 'nabor', 'montazh', 'harnes
 }
 
 const mainSkill = readFileSync(join(plugin, 'skills', 'ii-ramis', 'SKILL.md'), 'utf8');
-check(mainSkill.includes('ИИ Рамис на связи ✅ (версия 2.9)'), 'ii-ramis: нет приветствия версии 2.9');
+check(mainSkill.includes('ИИ Рамис на связи ✅ (версия 2.10)'), 'ii-ramis: нет приветствия версии 2.10');
 check(mainSkill.includes('🗣') && mainSkill.includes('🙋'), 'ii-ramis: нет блоков «Что случилось» / «Что сделать тебе»');
 
 const svodka = join(plugin, 'skills', 'ii-ramis', 'references', 'svodka.md');
 check(existsSync(svodka), 'нет references/svodka.md');
 if (existsSync(svodka)) {
   const text = readFileSync(svodka, 'utf8');
-  check(text.includes('plugin_version') && text.includes('2.9.1'), 'svodka.md: нет plugin_version 2.9.1');
+  check(text.includes('plugin_version') && text.includes('2.10.0'), 'svodka.md: нет plugin_version 2.10.0');
   check(!text.includes('Да/нет'), 'svodka.md: вопроса согласия быть не должно');
   check(text.includes('не отправляй сводки') && text.includes('consent: false'), 'svodka.md: нет правила отказа');
   check(!/curl -sS/.test(text) && text.includes('не запускай `curl`') && text.includes('📨 Сводка Рамису'), 'svodka.md: сводку отправляет хук, curl через Bash запрещён');
@@ -274,4 +276,4 @@ if (failures.length > 0) {
   check(!/\| (mixkit|eleven) \|/.test(licenses) && !/pixabay/i.test(licenses.replace(/Pixabay Music[^.]*\./, '')), 'LICENSES.md: Mixkit, ElevenLabs и Pixabay в библиотеку не входят');
 }
 
-console.log('OK: структура плагина 2.9 в порядке');
+console.log('OK: структура плагина 2.10 в порядке');
